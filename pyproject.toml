@@ -1,0 +1,10 @@
+[project]
+name = "afloy-lora-box"
+description = "Afloy Lora Box — compact multi-LoRA loader with a DOM-panel UI (search, per-row strength, drag reorder, trigger-word lookup)."
+version = "1.1.0"
+license = { text = "MIT" }
+dependencies = []
+
+[tool.comfy]
+PublisherId = "afloy"
+DisplayName = "Afloy Lora Box"

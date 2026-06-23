@@ -17,6 +17,7 @@ import os
 import json
 import math
 import struct
+import hashlib
 import logging
 from collections import OrderedDict
 
@@ -28,6 +29,18 @@ log = logging.getLogger("LoraBox")
 
 MAX_HEADER_BYTES = 32 * 1024 * 1024   # cap safetensors header read (anti-DoS)
 LORA_CACHE_MAX = 4                    # how many loaded LoRAs to keep in RAM
+META_CACHE_MAX = 64                   # how many parsed metadata headers to keep
+
+# path -> (mtime, metadata). Module-level so every node/route shares it; keyed
+# by mtime so replacing a lora file on disk transparently re-reads it.
+_META_CACHE = OrderedDict()
+
+
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return None
 
 
 def _safe_lora_path(name):
@@ -50,15 +63,27 @@ def _safe_lora_path(name):
 
 
 def _read_st_metadata(path):
+    # cache parsed headers by (path, mtime) so trigger-word lookups don't
+    # re-read the file on every graph execution.
+    mt = _mtime(path)
+    hit = _META_CACHE.get(path)
+    if hit and hit[0] == mt:
+        _META_CACHE.move_to_end(path)
+        return hit[1]
     try:
         with open(path, "rb") as f:
             n = struct.unpack("<Q", f.read(8))[0]
             if n <= 0 or n > MAX_HEADER_BYTES:
-                return {}
-            header = json.loads(f.read(n).decode("utf-8"))
-        return header.get("__metadata__", {}) or {}
+                meta = {}
+            else:
+                header = json.loads(f.read(n).decode("utf-8"))
+                meta = header.get("__metadata__", {}) or {}
     except Exception:
-        return {}
+        meta = {}
+    _META_CACHE[path] = (mt, meta)
+    while len(_META_CACHE) > META_CACHE_MAX:
+        _META_CACHE.popitem(last=False)
+    return meta
 
 
 def trigger_words_for(name):
@@ -131,21 +156,43 @@ class LoraBox:
     CATEGORY = "loaders"
 
     def __init__(self):
-        self._cache = OrderedDict()  # name -> loaded tensor dict (small LRU)
+        self._cache = OrderedDict()  # name -> (mtime, loaded tensor dict)
 
     def _get_lora(self, name):
-        if name in self._cache:
-            self._cache.move_to_end(name)
-            return self._cache[name]
         path = _safe_lora_path(name)
         if path is None:
             log.warning("LoRA not found / not allowed: %s", name)
             return None
+        mt = _mtime(path)
+        hit = self._cache.get(name)
+        if hit and hit[0] == mt:          # same file, unchanged on disk
+            self._cache.move_to_end(name)
+            return hit[1]
         lora = comfy.utils.load_torch_file(path, safe_load=True)
-        self._cache[name] = lora
+        self._cache[name] = (mt, lora)
         while len(self._cache) > LORA_CACHE_MAX:
             self._cache.popitem(last=False)
         return lora
+
+    @classmethod
+    def IS_CHANGED(cls, model, clip, data="[]"):
+        # Re-run when the row JSON changes OR when any referenced lora file is
+        # modified on disk, so cached weights / trigger words never go stale.
+        h = hashlib.sha256()
+        h.update((data or "").encode("utf-8"))
+        try:
+            obj = json.loads(data) if data else []
+        except Exception:
+            obj = []
+        rows = obj.get("rows") if isinstance(obj, dict) else obj
+        if isinstance(rows, list):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                path = _safe_lora_path(row.get("name"))
+                if path:
+                    h.update(("%s:%s" % (row.get("name"), _mtime(path))).encode("utf-8"))
+        return h.hexdigest()
 
     def apply(self, model, clip, data="[]"):
         try:

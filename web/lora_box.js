@@ -328,14 +328,13 @@ app.registerExtension({
             if (!node.size || node.size[0] < MIN_W) node.setSize([FIXED_W, (node.size && node.size[1]) || 200]);
 
             getLoraList();
-            setTimeout(() => initFromData(node), 30);
+            scheduleInit(node);
         };
 
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             onConfigure && onConfigure.apply(this, arguments);
-            const node = this;
-            setTimeout(() => initFromData(node), 30);
+            scheduleInit(this);
         };
 
         // The node is freely resizable both ways (like the core Note node). We
@@ -362,6 +361,15 @@ app.registerExtension({
         nodeType.prototype.onRemoved = function () { closePop(); onRemoved && onRemoved.apply(this, arguments); };
     },
 });
+
+/* Defer init to a macrotask so widget values restored during deserialize
+ * (onConfigure runs after ComfyUI sets the saved `data` value) are in place.
+ * Deduped per node so create+configure can't run it twice or race — replaces
+ * the old fixed 30ms timeout. */
+function scheduleInit(node) {
+    if (node._lbInitT) clearTimeout(node._lbInitT);
+    node._lbInitT = setTimeout(() => { node._lbInitT = 0; initFromData(node); }, 0);
+}
 
 function mkCheck(parent, label, onChange) {
     const l = document.createElement("label");
