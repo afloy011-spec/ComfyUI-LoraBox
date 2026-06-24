@@ -288,8 +288,8 @@ function injectStyle() {
 .lorabox .lb-card.lb-drop-before{box-shadow:inset 0 2px 0 0 var(--p-button-primary-background,#7aa2f0);}
 .lorabox .lb-card.lb-drop-after{box-shadow:inset 0 -2px 0 0 var(--p-button-primary-background,#7aa2f0);}
 
-.lorabox .lb-main{display:flex; gap:10px; align-items:center; min-width:0;}
-.lorabox .lb-content{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:7px;}
+.lorabox .lb-main{display:grid; grid-template-columns:48px minmax(0,1fr); gap:10px; align-items:center; min-width:0;}
+.lorabox .lb-content{min-width:0; display:flex; flex-direction:column; gap:7px;}
 
 /* thumbnail */
 .lorabox .lb-thumb{flex:0 0 auto; width:48px; height:48px; align-self:center; position:relative;
@@ -300,35 +300,20 @@ function injectStyle() {
 .lorabox .lb-thumb.drag-over{border-color:var(--p-button-primary-background,#7aa2f0); border-style:dashed;}
 .lorabox .lb-thumb img{width:100%; height:100%; object-fit:cover; display:none;}
 .lorabox .lb-thumb.has-img img{display:block;}
-/* empty state: two labelled buttons — Generate / Add — so it is obvious how to
-   give a picture-less LoRA a preview (this is the whole "how do I generate?"). */
-.lorabox .lb-thumb-acts{position:absolute; inset:0; display:none; flex-direction:column;
-  background:var(--comfy-menu-bg,#262626);}
-.lorabox .lb-thumb:not(.has-img) .lb-thumb-acts{display:flex;}
-.lorabox .lb-thumb-btn{flex:1; display:flex; align-items:center; justify-content:center; gap:4px;
-  cursor:pointer; color:var(--descrip-text,#bcbcbc); font-size:8px; letter-spacing:.03em;
-  text-transform:uppercase; user-select:none; transition:background .12s, color .12s;}
-.lorabox .lb-thumb-btn:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
-.lorabox .lb-thumb-btn .i{font-size:12px;}
-.lorabox .lb-thumb-btn + .lb-thumb-btn{border-top:1px solid var(--border-color,#3a3a3a);}
-.lorabox .lb-thumb-btn.busy{pointer-events:none; animation:lb-pulse 1s ease infinite;}
-@keyframes lb-pulse{0%,100%{opacity:.55}50%{opacity:1}}
-/* image state: small corner chips on hover (regenerate / replace / remove) */
-.lorabox .lb-thumb-chip{position:absolute; width:16px; height:16px; display:none; align-items:center;
-  justify-content:center; font-size:10px; line-height:1; border-radius:5px; cursor:pointer;
-  background:rgba(0,0,0,.62); color:#fff;}
-.lorabox .lb-thumb.has-img:hover .lb-thumb-chip{display:flex;}
-.lorabox .lb-thumb-chip.x{top:2px; right:2px;}
-.lorabox .lb-thumb-chip.x:hover{background:#7a2b2b;}
-.lorabox .lb-thumb-chip.gen{bottom:2px; right:2px;}
-.lorabox .lb-thumb-chip.rep{bottom:2px; left:2px;}
-.lorabox .lb-thumb-chip.gen:hover,.lorabox .lb-thumb-chip.rep:hover{background:var(--p-button-primary-background,#3b82f6);}
-.lorabox .lb-thumb-chip.busy{pointer-events:none; animation:lb-pulse 1s ease infinite;}
+/* a picture-less thumb shows a faint + ; click it for options (generate/upload),
+   so there are no extra icon buttons cluttering the row. */
+.lorabox .lb-thumb .lb-ph{font-size:20px; line-height:1; color:var(--descrip-text,#6f6f6f); pointer-events:none;}
+.lorabox .lb-thumb.has-img .lb-ph{display:none;}
+.lorabox .lb-thumb:hover .lb-ph{color:var(--input-text,#bbb);}
+.lorabox .lb-thumb.busy{opacity:.6; animation:lb-pulse 1s ease infinite;}
+@keyframes lb-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 
-/* row line 1: grip · switch · name · actions */
-.lorabox .lb-l1{display:flex; align-items:center; gap:8px; min-width:0; height:28px;}
+/* row line 1: switch · name(grows) · trigger · delete — a GRID with explicit
+   columns so the name never collapses and the icons never drift. */
+.lorabox .lb-l1{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:8px;
+  align-items:center; min-width:0; height:28px;}
 .lorabox .lb-ico svg{display:block;}
-.lorabox .lb-name{display:flex; align-items:center; gap:6px; flex:1 1 auto; min-width:0; height:28px;
+.lorabox .lb-name{display:flex; align-items:center; gap:6px; min-width:0; height:28px;
   padding:0 10px; cursor:pointer; user-select:none; border-radius:7px;
   background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
   border:1px solid transparent; transition:border-color .12s, background .12s;}
@@ -344,15 +329,16 @@ function injectStyle() {
 .lorabox .lb-ico.on{color:var(--p-button-primary-background,#7aa2f0);}
 .lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
 
-/* row line 2: slider · number (+ clip) */
-.lorabox .lb-l2{display:flex; align-items:center; gap:10px; min-width:0; height:24px;}
-.lorabox .lb-slider{-webkit-appearance:none; appearance:none; flex:1 1 auto; min-width:36px; height:4px;
+/* row line 2: slider(grows) · number (+ clip) — also a GRID */
+.lorabox .lb-l2{display:grid; grid-template-columns:minmax(0,1fr) 52px; gap:10px; align-items:center; min-width:0; height:24px;}
+.lorabox .lb-l2.sep{grid-template-columns:minmax(0,1fr) 52px auto 52px;}
+.lorabox .lb-slider{-webkit-appearance:none; appearance:none; width:100%; min-width:36px; height:4px;
   border-radius:3px; background:var(--border-color,#4a4a4a); outline:none; cursor:pointer;}
 .lorabox .lb-slider::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%;
   background:var(--p-button-primary-background,#3b82f6); border:2px solid var(--comfy-input-bg,#1e1e1e); cursor:pointer;}
 .lorabox .lb-slider::-moz-range-thumb{width:14px; height:14px; border-radius:50%;
   background:var(--p-button-primary-background,#3b82f6); border:2px solid var(--comfy-input-bg,#1e1e1e); cursor:pointer;}
-.lorabox .lb-num{flex:0 0 52px; width:52px; height:24px; padding:0 6px; text-align:center;
+.lorabox .lb-num{width:100%; height:24px; padding:0 6px; text-align:center;
   background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
   border:1px solid var(--border-color,#3a3a3a); border-radius:7px; font-size:11px;
   -moz-appearance:textfield; appearance:textfield;}
@@ -453,33 +439,32 @@ const TAG_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" str
 // explains how a LoRA weight can be negative (the "minus" people don't expect)
 const STRENGTH_TIP = "Strength: 1.0 = normal, 0 = off, below 0 = anti-LoRA (pushes the image away from this concept), up to 3 = stronger than trained.";
 
-/* ---- generate-preview type menu (Character / Style …) ------------------- */
-const GEN_KINDS = [
-    ["character", "Character / portrait", "renders a person — best for character & face LoRAs"],
-    ["style", "Style / scene", "renders an everyday scene — best for style LoRAs"],
-];
-let GEN_MENU = null;
-function onGenDocDown(e) { if (GEN_MENU && !GEN_MENU.contains(e.target)) closeGenMenu(); }
-function closeGenMenu() {
-    if (!GEN_MENU) return;
-    document.removeEventListener("mousedown", onGenDocDown, true);
-    GEN_MENU.remove(); GEN_MENU = null;
+/* ---- small floating text menu (thumbnail picture options) --------------- */
+let MENU = null;
+function onMenuDocDown(e) { if (MENU && !MENU.contains(e.target)) closeMenu(); }
+function closeMenu() {
+    if (!MENU) return;
+    document.removeEventListener("mousedown", onMenuDocDown, true);
+    MENU.remove(); MENU = null;
 }
-function openGenMenu(anchor, cb) {
-    closeGenMenu();
+// items: [{head}] section label, or {label, desc?, onPick} action
+function openMenu(anchor, items) {
+    closeMenu();
     const m = document.createElement("div");
     m.className = "lb-menu";
-    const head = document.createElement("div");
-    head.className = "lb-menu-head"; head.textContent = "Generate preview as…";
-    m.appendChild(head);
-    GEN_KINDS.forEach(([k, label, desc]) => {
-        const it = document.createElement("button");
-        it.className = "lb-menu-item";
-        const t = document.createElement("span"); t.className = "t"; t.textContent = label;
-        const d = document.createElement("span"); d.className = "d"; d.textContent = desc;
-        it.append(t, d);
-        it.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); closeGenMenu(); cb(k); };
-        m.appendChild(it);
+    items.forEach((it) => {
+        if (it.head) {
+            const h = document.createElement("div");
+            h.className = "lb-menu-head"; h.textContent = it.head;
+            m.appendChild(h); return;
+        }
+        const b = document.createElement("button");
+        b.className = "lb-menu-item";
+        const t = document.createElement("span"); t.className = "t"; t.textContent = it.label;
+        b.appendChild(t);
+        if (it.desc) { const d = document.createElement("span"); d.className = "d"; d.textContent = it.desc; b.appendChild(d); }
+        b.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); closeMenu(); it.onPick(); };
+        m.appendChild(b);
     });
     stop(m);
     document.body.appendChild(m);
@@ -490,8 +475,8 @@ function openGenMenu(anchor, cb) {
     if (top + mh > window.innerHeight - 8) top = r.top - mh - 4;
     m.style.left = Math.max(8, left) + "px";
     m.style.top = Math.max(8, top) + "px";
-    GEN_MENU = m;
-    setTimeout(() => document.addEventListener("mousedown", onGenDocDown, true), 0);
+    MENU = m;
+    setTimeout(() => document.addEventListener("mousedown", onMenuDocDown, true), 0);
 }
 
 /* Force the panel's root element to span the node's content width. The
@@ -836,7 +821,7 @@ app.registerExtension({
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
-        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); closeGenMenu(); closeToast(); onRemoved && onRemoved.apply(this, arguments); };
+        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); closeMenu(); closeToast(); onRemoved && onRemoved.apply(this, arguments); };
     },
 });
 
@@ -1079,7 +1064,7 @@ function renderRows(node) {
         l1.append(sw, field, trig, del);
 
         const l2 = document.createElement("div");
-        l2.className = "lb-l2";
+        l2.className = "lb-l2" + (node._lbSep ? " sep" : "");
 
         const slider = document.createElement("input");
         slider.className = "lb-slider"; slider.type = "range";
@@ -1116,37 +1101,18 @@ function renderRows(node) {
 }
 
 /* per-row thumbnail: the lora's reference picture (shared across workflows).
- * Auto-loads the lora's own preview when one exists. When empty, two labelled
- * buttons make it obvious: ✨ Generate (a quick Z-Image render) or ＋ Add (your
- * own image, click or drag&drop). With an image, hover shows corner chips to
- * regenerate / replace / remove, and hovering enlarges it. */
+ * Auto-loads the lora's own preview when one exists. A picture-less thumb shows
+ * a faint +; clicking it (or an image) opens a small TEXT menu with the options
+ * — Generate (Character/Style), Upload, Remove — so the row stays icon-free.
+ * Hover an image to enlarge it; you can also drag & drop an image onto it. */
 function buildThumb(node, row) {
     const thumb = document.createElement("div");
     thumb.className = "lb-thumb";
+    thumb.title = "Picture for this LoRA — click for options";
     const img = document.createElement("img");
-
-    // empty-state buttons (visible when there is no image)
-    const acts = document.createElement("div");
-    acts.className = "lb-thumb-acts";
-    const genBtn = document.createElement("div");
-    genBtn.className = "lb-thumb-btn";
-    genBtn.innerHTML = '<span class="i">✨</span><span>gen</span>';
-    genBtn.title = "Generate a preview now — a quick Z-Image test render of this LoRA";
-    const addBtn = document.createElement("div");
-    addBtn.className = "lb-thumb-btn";
-    addBtn.innerHTML = '<span class="i">＋</span><span>add</span>';
-    addBtn.title = "Use your own image — click to pick, or drag & drop one here";
-    acts.append(genBtn, addBtn);
-
-    // image-state corner chips (shown on hover)
-    const chipGen = document.createElement("div");
-    chipGen.className = "lb-thumb-chip gen"; chipGen.textContent = "✨"; chipGen.title = "Regenerate preview";
-    const chipRep = document.createElement("div");
-    chipRep.className = "lb-thumb-chip rep"; chipRep.textContent = "＋"; chipRep.title = "Replace with your own image";
-    const chipX = document.createElement("div");
-    chipX.className = "lb-thumb-chip x"; chipX.textContent = "✕"; chipX.title = "Remove picture";
-
-    thumb.append(img, acts, chipGen, chipRep, chipX);
+    const ph = document.createElement("div");
+    ph.className = "lb-ph"; ph.textContent = "＋";
+    thumb.append(img, ph);
 
     const setURL = (url) => {
         // URLs are owned by PREVIEW_CACHE (shared across renders) — do NOT revoke
@@ -1183,29 +1149,34 @@ function buildThumb(node, row) {
         inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) applyFile(f); };
         inp.click();
     };
-    const doGen = async (btn, busyHTML, kind) => {
-        if (btn.classList.contains("busy")) return;
-        const html = btn.innerHTML;
-        btn.classList.add("busy"); btn.innerHTML = busyHTML;
+    const doGen = async (kind) => {
+        if (thumb.classList.contains("busy")) return;
+        closeThumbPop();
+        thumb.classList.add("busy");
         const res = await generatePreview(row.name, kind);
-        btn.classList.remove("busy"); btn.innerHTML = html;
+        thumb.classList.remove("busy");
         if (res && res.ok) { evictPreview(row.name); refresh(); }
         else alert("Preview generation failed: " + ((res && res.error) || "unknown error"));
     };
 
-    genBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; openGenMenu(genBtn, (k) => doGen(genBtn, '<span class="i">⏳</span><span>…</span>', k)); };
-    addBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
-    chipGen.onclick = (e) => { e.stopPropagation(); if (needLora()) return; openGenMenu(chipGen, (k) => doGen(chipGen, "⏳", k)); };
-    chipRep.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
-    chipX.onclick = async (e) => {
+    thumb.onclick = (e) => {
         e.stopPropagation();
-        if (!row.name || row.name === "None") return;
-        closeThumbPop();
-        await deletePreview(row.name);
-        evictPreview(row.name);
-        refresh();
+        if (needLora()) return;
+        const items = [
+            { head: "Picture for this LoRA" },
+            { label: "Generate — Character", desc: "a portrait, for character LoRAs", onPick: () => doGen("character") },
+            { label: "Generate — Style", desc: "a scene, for style LoRAs", onPick: () => doGen("style") },
+            { label: "Upload an image…", onPick: pickFile },
+        ];
+        if (thumb.classList.contains("has-img")) {
+            items.push({
+                label: "Remove picture", onPick: async () => {
+                    closeThumbPop(); await deletePreview(row.name); evictPreview(row.name); refresh();
+                }
+            });
+        }
+        openMenu(thumb, items);
     };
-
     // drag & drop an image straight onto the thumbnail
     thumb.addEventListener("dragover", (e) => {
         if (!row.name || row.name === "None") return;
