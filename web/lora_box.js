@@ -95,24 +95,6 @@ async function deletePreview(name) {
     catch (e) {}
 }
 
-async function generatePreview(name, kind = "character") {
-    if (!name || name === "None") return { ok: false, error: "no lora selected" };
-    const url = "/lorabox/preview/generate?file=" + encodeURIComponent(name)
-        + "&kind=" + encodeURIComponent(kind);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 180000);
-    try {
-        const r = await api.fetchApi(url, { method: "POST", signal: ctrl.signal });
-        const j = await r.json();
-        return j;
-    } catch (e) {
-        if (e && e.name === "AbortError") return { ok: false, error: "timed out (3 min)" };
-        return { ok: false, error: String(e) };
-    } finally {
-        clearTimeout(timer);
-    }
-}
-
 /* floating enlarged preview on hover */
 let THUMB_POP = null;
 function closeThumbPop() { if (THUMB_POP) { THUMB_POP.remove(); THUMB_POP = null; } }
@@ -167,14 +149,27 @@ function injectStyle() {
   border:1px solid var(--border-color,#4a4a4a); border-radius:6px; font-size:11px; outline:none;}
 .lorabox .lb-head2 input.lb-delim:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
 .lorabox .lb-list{display:flex; flex-direction:column; gap:${GAP}px;}
-.lorabox .lb-card{display:flex; flex-direction:column; gap:6px; min-width:0;
-  padding:8px 9px; border-radius:9px;
-  background:var(--comfy-input-bg,#1e1e1e); border:1px solid var(--border-color,#3a3a3a);
-  transition:opacity .12s,border-color .12s;}
-.lorabox .lb-card:hover{border-color:var(--p-button-primary-background,#5a7fd0);}
-.lorabox .lb-card.lb-off{opacity:.42;}
+.lorabox .lb-card{position:relative; display:flex; flex-direction:column; gap:6px; min-width:0;
+  padding:8px 9px 8px 13px; border-radius:10px;
+  background:linear-gradient(180deg, var(--comfy-input-bg,#1e1e1e),
+    color-mix(in srgb, var(--comfy-input-bg,#1e1e1e) 84%, #000));
+  border:1px solid var(--border-color,#3a3a3a);
+  transition:opacity .14s, border-color .14s, box-shadow .14s;}
+/* left accent stripe = "this lora is active"; non-color cue is its presence */
+.lorabox .lb-card::before{content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px;
+  border-radius:0 3px 3px 0; background:var(--p-button-primary-background,#3b82f6);
+  opacity:.9; transition:opacity .14s, background .14s;}
+.lorabox .lb-card.lb-off::before{opacity:0;}
+.lorabox .lb-card:hover{border-color:var(--p-button-primary-background,#5a7fd0);
+  box-shadow:0 3px 12px rgba(0,0,0,.28);}
+.lorabox .lb-card.lb-off{opacity:.5;}
 .lorabox .lb-card.lb-dup{border-color:#b9802f;}
+.lorabox .lb-card.lb-dup::before{background:#d8932f; opacity:1;}
 .lorabox .lb-card.lb-dup .lb-name{border-color:#b9802f;}
+/* explicit text badge so the duplicate state isn't conveyed by colour alone */
+.lorabox .lb-card.lb-dup::after{content:"duplicate"; position:absolute; top:-7px; right:9px;
+  font-size:8px; line-height:1.4; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
+  color:#241a0c; background:#d8932f; padding:1px 6px; border-radius:5px; pointer-events:none;}
 .lorabox .lb-main{display:flex; gap:9px; align-items:stretch; min-width:0;}
 .lorabox .lb-content{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:6px;}
 .lorabox .lb-thumb{flex:0 0 auto; width:54px; height:54px; align-self:center; position:relative;
@@ -193,14 +188,7 @@ function injectStyle() {
   background:rgba(0,0,0,.62); color:#fff; line-height:1;}
 .lorabox .lb-thumb.has-img:hover .lb-thumb-x{display:flex;}
 .lorabox .lb-thumb .lb-thumb-x:hover{background:#7a2b2b;}
-.lorabox .lb-thumb .lb-thumb-gen{position:absolute; bottom:2px; left:2px; width:18px; height:18px;
-  display:flex; align-items:center; justify-content:center; font-size:11px; border-radius:4px;
-  background:rgba(0,0,0,.55); color:#dfe8ff; cursor:pointer; line-height:1;}
-.lorabox .lb-thumb .lb-thumb-gen:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
-.lorabox .lb-thumb .lb-thumb-gen.busy{opacity:.65; pointer-events:none; animation:lb-pulse 1s ease infinite;}
-.lorabox .lb-thumb .lb-thumb-gen.ok{background:#2d6a4f;}
-@keyframes lb-pulse{0%,100%{opacity:.65}50%{opacity:1}}
-.lorabox .lb-l1{display:grid; grid-template-columns:14px 18px 1fr 26px 26px 26px; gap:6px; align-items:center; min-width:0;}
+.lorabox .lb-l1{display:grid; grid-template-columns:14px 18px 1fr 26px 26px; gap:6px; align-items:center; min-width:0;}
 .lorabox .lb-drag{width:14px; height:26px; display:flex; align-items:center; justify-content:center;
   cursor:grab; color:var(--descrip-text,#777); font-size:12px; line-height:1; user-select:none; flex:0 0 auto;}
 .lorabox .lb-drag:hover{color:var(--input-text,#ccc);}
@@ -230,6 +218,9 @@ function injectStyle() {
 .lorabox .lb-num::-webkit-outer-spin-button,
 .lorabox .lb-num::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
 .lorabox .lb-num:focus{outline:none; border-color:var(--p-button-primary-background,#6a8fe0);}
+/* at-a-glance read of the weight: warm for negative ("anti-LoRA"), dim for 0 */
+.lorabox .lb-num.neg{color:#e8855a; border-color:#7a4a36;}
+.lorabox .lb-num.zero{color:var(--descrip-text,#888);}
 .lorabox .lb-tag{font-size:9px; color:var(--descrip-text,#888); text-align:center; justify-self:center; overflow:hidden; white-space:nowrap;}
 .lorabox .lb-ico{width:26px; height:26px; padding:0; cursor:pointer; display:flex;
   align-items:center; justify-content:center; background:transparent;
@@ -291,6 +282,7 @@ function injectStyle() {
 }
 
 const round2 = (v) => (Math.round(v * 100) / 100).toString();
+const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.toggle("zero", v === 0); };
 
 /* Force the panel's root element to span the node's content width. The
  * frontend positions/sizes DOM widgets reactively off the widget's HEIGHT, so
@@ -696,19 +688,6 @@ function moveRow(node, from, to) {
     renderRows(node); sizeNode(node); serialize(node);
 }
 
-/* ---- random lora --------------------------------------------------------- */
-function pickRandomLora(node, row) {
-    const apply = () => {
-        const l = LORA_LIST || [];
-        if (!l.length) return;
-        row.name = l[Math.floor(Math.random() * l.length)];
-        delete row.trig;            // let auto-detect re-run for the new lora
-        renderRows(node); sizeNode(node); serialize(node);
-    };
-    if (LORA_LIST && LORA_LIST.length) apply();
-    else getLoraList().then(apply);
-}
-
 /* Single source of truth: read the saved `data` widget, default only if truly
  * empty. Used by both onNodeCreated and onConfigure so neither can clobber the
  * other (the old code rendered empty + serialized "[]" during a load race). */
@@ -772,7 +751,8 @@ function mkNum(val, title, onChange) {
     const n = document.createElement("input");
     n.className = "lb-num"; n.type = "number";
     n.min = String(SMIN); n.max = String(SMAX); n.step = "0.05"; n.value = round2(val); n.title = title;
-    n.onchange = () => { const v = clampS(parseFloat(n.value)); n.value = round2(v); onChange(v); };
+    tintNum(n, val);
+    n.onchange = () => { const v = clampS(parseFloat(n.value)); n.value = round2(v); tintNum(n, v); onChange(v); };
     stop(n); eatWheel(n);
     return n;
 }
@@ -819,11 +799,6 @@ function renderRows(node) {
         };
         stop(field);
 
-        const rnd = document.createElement("button");
-        rnd.className = "lb-ico"; rnd.textContent = "🎲"; rnd.title = "pick a random lora";
-        rnd.onclick = (e) => { e.stopPropagation(); pickRandomLora(node, row); };
-        stop(rnd);
-
         const trig = document.createElement("button");
         trig.className = "lb-ico" + (row._open ? " on" : ""); trig.textContent = "ⓘ"; trig.title = "trigger words";
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
@@ -834,7 +809,7 @@ function renderRows(node) {
         del.onclick = (e) => { e.stopPropagation(); node._lbRows.splice(i, 1); renderRows(node); sizeNode(node); serialize(node); };
         stop(del);
 
-        l1.append(handle, en, field, rnd, trig, del);
+        l1.append(handle, en, field, trig, del);
 
         const l2 = document.createElement("div");
         l2.className = "lb-l2" + (node._lbSep ? " sep" : "");
@@ -844,7 +819,7 @@ function renderRows(node) {
         slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm); slider.title = "strength";
         const num = mkNum(row.sm, node._lbSep ? "model strength" : "strength",
             (v) => { row.sm = v; slider.value = String(v); serialize(node); });
-        slider.oninput = () => { row.sm = clampS(parseFloat(slider.value)); num.value = round2(row.sm); serialize(node); };
+        slider.oninput = () => { row.sm = clampS(parseFloat(slider.value)); num.value = round2(row.sm); tintNum(num, row.sm); serialize(node); };
         stop(slider); eatWheel(slider);
 
         l2.append(slider, num);
@@ -883,9 +858,7 @@ function buildThumb(node, row) {
     ph.innerHTML = '<span>🖼</span><span class="lb-ph-t">add</span>';
     const x = document.createElement("div");
     x.className = "lb-thumb-x"; x.textContent = "✕"; x.title = "remove picture";
-    const gen = document.createElement("div");
-    gen.className = "lb-thumb-gen"; gen.textContent = "⚡"; gen.title = "generate canonical preview (Z-Image test)";
-    thumb.append(img, ph, x, gen);
+    thumb.append(img, ph, x);
 
     const setURL = (url) => {
         if (thumb._url) { try { URL.revokeObjectURL(thumb._url); } catch (e) {} }
@@ -923,25 +896,6 @@ function buildThumb(node, row) {
         closeThumbPop();
         await deletePreview(row.name);
         refresh();
-    };
-    gen.onclick = async (e) => {
-        e.stopPropagation();
-        if (!row.name || row.name === "None") return;
-        if (gen.classList.contains("busy")) return;
-        gen.classList.add("busy");
-        gen.textContent = "…";
-        const res = await generatePreview(row.name, "character");
-        gen.classList.remove("busy");
-        if (res.ok) {
-            gen.textContent = "✓";
-            gen.classList.add("ok");
-            refresh();
-            setTimeout(() => { gen.textContent = "⚡"; gen.classList.remove("ok"); }, 2000);
-        } else {
-            gen.textContent = "!";
-            alert("Preview failed: " + (res.error || "unknown error"));
-            setTimeout(() => { gen.textContent = "⚡"; }, 2500);
-        }
     };
     thumb.onmouseenter = () => { if (thumb._url) openThumbPop(thumb, thumb._url); };
     thumb.onmouseleave = () => closeThumbPop();

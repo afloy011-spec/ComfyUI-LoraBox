@@ -93,27 +93,15 @@ def trigger_words_for(name):
     meta = _read_st_metadata(path)
     words = []
 
-    # explicit trigger fields used by various trainers / civitai exports
+    # Only real trigger fields written by trainers / civitai exports. We do
+    # NOT fall back to the most frequent training tags (ss_tag_frequency): those
+    # are dataset tags, not trigger words, and silently injecting them adds
+    # noise to the prompt the user never asked for.
     for k in ("modelspec.trigger_phrase", "trigger_phrase", "ss_trigger_words",
               "activation text", "trainedWords"):
         v = meta.get(k)
         if isinstance(v, str) and v.strip():
             words.extend([w.strip() for w in v.split(",") if w.strip()])
-
-    # fall back to the most frequent training tags (kohya) — note: tags, not
-    # true trigger words, so this is best-effort only.
-    if not words:
-        tf = meta.get("ss_tag_frequency")
-        if tf:
-            try:
-                freq = {}
-                for _ds, tags in json.loads(tf).items():
-                    for tag, cnt in tags.items():
-                        freq[tag.strip()] = freq.get(tag.strip(), 0) + int(cnt)
-                top = sorted(freq.items(), key=lambda x: -x[1])[:10]
-                words = [t for t, _c in top if t]
-            except Exception:
-                pass
 
     seen, out = set(), []
     for w in words:
@@ -313,27 +301,6 @@ try:
             except OSError:
                 pass
         return web.json_response({"ok": removed})
-
-    @PromptServer.instance.routes.post("/lorabox/preview/generate")
-    async def _lorabox_preview_generate(request):
-        """Generate a canonical Z-Image test image and save it as the lora sidecar."""
-        lora = request.query.get("file", "")
-        kind = request.query.get("kind", "character")
-        if not _preview_base(lora):
-            return web.json_response({"ok": False, "error": "unknown lora"}, status=400)
-        try:
-            try:
-                from .preview_generate import generate_lora_preview
-            except ImportError:
-                from preview_generate import generate_lora_preview
-
-            path = await generate_lora_preview(lora, kind)
-            return web.json_response({"ok": True, "path": os.path.basename(path)})
-        except TimeoutError as ex:
-            return web.json_response({"ok": False, "error": str(ex)}, status=504)
-        except Exception as ex:
-            log.exception("preview generate failed for %s", lora)
-            return web.json_response({"ok": False, "error": str(ex)}, status=500)
 except Exception as e:  # pragma: no cover - server may be unavailable at import
     log.warning("could not register /lorabox routes: %s", e)
 
@@ -473,7 +440,7 @@ class LoraBox:
                 triggers.extend(trigger_words_for(name))
 
         if applied:
-            print("[LoraBox] applied: " + "; ".join(applied))
+            log.info("applied: %s", "; ".join(applied))
 
         seen, words = set(), []
         for w in triggers:
@@ -522,7 +489,7 @@ class LoraBoxPromptMerge:
     def merge(self, prompt, triggers, position, delimiter):
         out = merge_prompt(prompt, triggers, position, delimiter)
         side = "BEGINNING" if str(position).startswith("beginning") else "END"
-        print(f"[LoraBoxPromptMerge] triggers at {side} -> {out[:160]}")
+        log.debug("PromptMerge triggers at %s -> %s", side, out[:160])
         return (out,)
 
 

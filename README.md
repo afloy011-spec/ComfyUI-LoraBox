@@ -13,17 +13,14 @@ offering a one-row-per-LoRA design.
 - Optional separate **model** / **clip** strengths (`model + clip` checkbox).
 - **Mute all** that survives a workflow save without wiping per-row on/off state.
 - Drag-to-reorder rows; duplicate LoRAs are highlighted.
-- Per-row trigger words: auto-detected from safetensors metadata, fully editable,
-  resettable to auto. Merged straight into the `prompt` output.
+- Per-row trigger words: auto-detected from real safetensors trigger fields
+  (not noisy training tags), fully editable, resettable to auto. Merged straight
+  into the `prompt` output.
 - **Per-LoRA preview pictures**: each row shows a thumbnail of the LoRA so they
   are easy to tell apart. Click the thumbnail to attach an image, hover to
   enlarge it, ✕ to remove. The picture is stored as a sidecar next to the
   `.safetensors` (same basename), so it *belongs to the LoRA* and shows in every
   workflow / every Lora Box once set.
-- **Generate preview** (⚡ on the thumbnail): runs a fixed canonical Z-Image Turbo
-  test (same prompt template + seed for every LoRA) and saves the result as the
-  sidecar automatically.
-- Random-LoRA button (🎲).
 
 ## Node
 
