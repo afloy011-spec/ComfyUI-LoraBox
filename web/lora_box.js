@@ -22,8 +22,11 @@ import { api } from "../../scripts/api.js";
  */
 
 const GAP = 8, MIN_W = 240, FIXED_W = 380;
-const PAD_V = 18, HEAD_H = 24, OPTS_H = 116, CARD_BASE = 80, ADD_H = 34, EMPTY_H = 46, BUFFER = 8;
-const TRIG_GAP = 8, TRIG_MIN = 28;
+// Heights tuned to the Figma "Design System" mockup: taller LORA STACK header
+// (40), 56px thumbnail cards, model+clip adds a second weight row (SEP_EXTRA),
+// trigger editor is a titled panel (TRIG_HEAD + padding). All deterministic.
+const PAD_V = 18, HEAD_H = 40, OPTS_H = 208, CARD_BASE = 80, SEP_EXTRA = 26, ADD_H = 38, EMPTY_H = 86, BUFFER = 8;
+const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 18, TRIG_MIN = 28;
 // Allow negative ("anti-LoRA") and >1 weights for parity with rgthree / the
 // core loader. Default still sits at 1.0; clamp keeps it sane.
 const SMIN = -3, SMAX = 3;
@@ -206,227 +209,230 @@ function injectStyle() {
     const s = document.createElement("style");
     s.id = "lorabox-style";
     s.textContent = `
+/* ── Afloy Lora Box — visual layer ported 1:1 from the Figma "Design System"
+   mockup (file dV1Uq5…). Colours/radii/spacings match the mockup; the DOM
+   structure & sizing machinery are unchanged. ── */
 .lorabox-root{width:100%; height:100%; overflow:hidden; box-sizing:border-box;}
 .lorabox{width:100%; display:flex; flex-direction:column;
-  font-family:inherit; font-size:12px; color:var(--input-text,#ddd);
+  font-family:'Inter',var(--font-sans,inherit); font-size:12px; color:var(--input-text,#f0f0f0);
   padding:8px 10px 10px; gap:${GAP}px; box-sizing:border-box;}
 .lorabox *{box-sizing:border-box;}
 
-/* header: title + live count + options disclosure */
-.lorabox .lb-head{display:flex; align-items:center; gap:8px; height:${HEAD_H}px;}
-.lorabox .lb-title{display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
-  letter-spacing:.01em; color:var(--input-text,#ececec); user-select:none;}
-.lorabox .lb-title .em{font-size:13px;}
-.lorabox .lb-count{margin-left:auto; font-size:10px; font-weight:600; white-space:nowrap;
-  padding:2px 8px; border-radius:10px;
-  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 16%, transparent);
-  color:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 70%, #fff);}
-.lorabox .lb-count.muted{background:color-mix(in srgb, #b9802f 22%, transparent); color:#e7ad5e;}
-.lorabox .lb-gear{width:24px; height:24px; flex:0 0 auto; display:flex; align-items:center;
-  justify-content:center; background:transparent; border:none; border-radius:7px; cursor:pointer;
-  color:var(--descrip-text,#9a9a9a); font-size:14px; line-height:1; transition:background .12s,color .12s;}
-.lorabox .lb-gear:hover{background:var(--comfy-menu-bg,#3a3a3a); color:var(--input-text,#fff);}
-.lorabox .lb-gear.on{color:var(--p-button-primary-background,#7aa2f0);
-  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 18%, transparent);}
+/* header: "LORA STACK" · active badge · ⚙ — a section divider underneath */
+.lorabox .lb-head{display:flex; align-items:center; gap:12px; height:${HEAD_H}px;
+  border-bottom:1px solid var(--border-color,#1f1f1f);}
+.lorabox .lb-title{margin-right:auto; font-size:11px; font-weight:600; letter-spacing:.08em;
+  text-transform:uppercase; color:#6a6a6a; user-select:none;}
+.lorabox .lb-head-actions{display:flex; align-items:center; gap:14px;}
+.lorabox .lb-count{font-size:11px; font-weight:600; white-space:nowrap; padding:4px 8px;
+  border-radius:5px; background:#1d3a5f; color:#3b82f6;}
+.lorabox .lb-count.muted{background:#3a2e1a; color:#e7ad5e;}
+.lorabox .lb-gear{width:20px; height:20px; flex:0 0 auto; display:flex; align-items:center;
+  justify-content:center; background:transparent; border:none; border-radius:6px; cursor:pointer;
+  color:#777; line-height:1; transition:background .12s,color .12s; padding:0;}
+.lorabox .lb-gear:hover{background:var(--comfy-menu-bg,#3a3a3a); color:#fff;}
+.lorabox .lb-gear.on{color:#3b82f6;}
+.lorabox .lb-gear svg{display:block;}
 
-/* options disclosure */
-.lorabox .lb-opts{display:flex; flex-direction:column; gap:9px; padding:10px 11px;
-  background:var(--comfy-input-bg,#1b1b1b); border:1px solid var(--border-color,#333); border-radius:10px;}
-.lorabox .lb-opts-row{display:flex; align-items:center; gap:16px; flex-wrap:wrap; min-height:18px;}
-.lorabox .lb-opts .lb-swrow{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
-  font-size:11px; color:var(--descrip-text,#bdbdbd);}
-.lorabox .lb-opts .lb-lbl{font-size:11px; color:var(--descrip-text,#9a9a9a); user-select:none;}
-.lorabox .lb-opts select{flex:1 1 auto; min-width:0; height:24px; padding:0 6px; cursor:pointer;
-  background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#4a4a4a); border-radius:7px; font-size:11px; outline:none;}
-.lorabox .lb-opts select:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
-.lorabox .lb-opts input.lb-delim{width:52px; height:24px; text-align:center;
-  background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#4a4a4a); border-radius:7px; font-size:11px; outline:none;}
-.lorabox .lb-opts input.lb-delim:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
-.lorabox .lb-opts .lb-hint{font-size:10px; line-height:1.45; color:var(--descrip-text,#888);}
-.lorabox .lb-opts .lb-hint b{color:var(--descrip-text,#b5b5b5); font-weight:600;}
+/* options disclosure — full-width rows, a TRIGGERS section, a hint */
+.lorabox .lb-opts{display:flex; flex-direction:column; gap:0; padding:6px 14px 12px;
+  background:var(--comfy-input-bg,#161616); border:1px solid var(--border-color,#272727); border-radius:10px;}
+.lorabox .lb-opts .lb-orow{display:flex; align-items:center; gap:12px; min-height:34px;}
+.lorabox .lb-opts .lb-orow .lb-olbl{margin-right:auto; font-size:13px; color:#d4d4d4; user-select:none; cursor:pointer;}
+.lorabox .lb-opts .lb-sec{margin-top:8px; padding-bottom:2px; font-size:10px; font-weight:600;
+  letter-spacing:.07em; text-transform:uppercase; color:#6a6a6a;}
+.lorabox .lb-opts select{height:28px; padding:0 8px; cursor:pointer; min-width:74px;
+  background:var(--comfy-menu-bg,#1c1c1c); color:#e6e6e6; border:1px solid var(--border-color,#2e2e2e);
+  border-radius:6px; font-size:12px; outline:none;}
+.lorabox .lb-opts select:focus{border-color:#3b82f6;}
+.lorabox .lb-opts input.lb-delim{width:44px; height:28px; text-align:center;
+  background:#0d0d0d; color:#e6e6e6; border:1px solid var(--border-color,#2e2e2e);
+  border-radius:6px; font-size:12px; outline:none;}
+.lorabox .lb-opts input.lb-delim:focus{border-color:#3b82f6;}
+.lorabox .lb-opts .lb-hint{margin-top:10px; font-size:11px; line-height:1.5; color:#6f6f6f;}
+.lorabox .lb-opts .lb-hint b{color:#9a9a9a; font-weight:600;}
 
-/* toggle switch */
-.lb-switch{position:relative; width:30px; height:18px; flex:0 0 auto; cursor:pointer; display:inline-block;}
+/* toggle switch (lg variant for the options panel) */
+.lb-switch{position:relative; width:32px; height:18px; flex:0 0 auto; cursor:pointer; display:inline-block;}
 .lb-switch input{position:absolute; inset:0; opacity:0; margin:0; cursor:pointer;}
-.lb-switch .track{position:absolute; inset:0; border-radius:9px; background:var(--border-color,#4a4a4a);
+.lb-switch .track{position:absolute; inset:0; border-radius:9px; background:var(--border-color,#3a3a3a);
   transition:background .15s;}
 .lb-switch .knob{position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%;
-  background:#e6e6e6; transition:transform .15s; pointer-events:none;
-  box-shadow:0 1px 2px rgba(0,0,0,.4);}
-.lb-switch input:checked + .track{background:var(--p-button-primary-background,#3b82f6);}
-.lb-switch input:checked ~ .knob{transform:translateX(12px);}
+  background:#e6e6e6; transition:transform .15s; pointer-events:none; box-shadow:0 1px 2px rgba(0,0,0,.4);}
+.lb-switch input:checked + .track{background:#3b82f6;}
+.lb-switch input:checked ~ .knob{transform:translateX(14px);}
+.lb-switch.lg{width:42px; height:22px;}
+.lb-switch.lg .knob{width:18px; height:18px;}
+.lb-switch.lg input:checked ~ .knob{transform:translateX(20px);}
 
 /* list + cards */
 .lorabox .lb-list{display:flex; flex-direction:column; gap:${GAP}px;}
-.lorabox .lb-card{position:relative; display:flex; flex-direction:column; gap:7px; min-width:0;
-  padding:9px 10px 9px 17px; border-radius:11px;
-  background:linear-gradient(180deg, var(--comfy-input-bg,#1e1e1e),
-    color-mix(in srgb, var(--comfy-input-bg,#1e1e1e) 85%, #000));
-  border:1px solid var(--border-color,#363636);
+.lorabox .lb-card{position:relative; display:flex; flex-direction:column; min-width:0;
+  padding:10px; border-radius:8px;
+  background:var(--comfy-input-bg,#1c1c1e); border:1px solid var(--border-color,#2a2a2a);
   transition:opacity .14s, border-color .14s, box-shadow .14s;}
-/* the left bar IS the drag handle — grab it to reorder. Blue = active,
-   grey = disabled, so the colour also doubles as the on/off cue. */
-.lorabox .lb-stripe{position:absolute; left:0; top:0; bottom:0; width:13px; cursor:grab;
-  display:flex; align-items:center;}
-.lorabox .lb-stripe::after{content:""; width:4px; height:calc(100% - 18px); border-radius:0 4px 4px 0;
-  background:var(--p-button-primary-background,#3b82f6); transition:background .14s, width .12s;}
-.lorabox .lb-card.lb-off .lb-stripe::after{background:var(--border-color,#5a5a5a);}
-.lorabox .lb-card.lb-dup .lb-stripe::after{background:#d8932f;}
-.lorabox .lb-stripe:hover::after{width:6px;}
-.lorabox .lb-stripe:active{cursor:grabbing;}
-.lorabox .lb-card:hover{border-color:var(--p-button-primary-background,#5273b8);
-  box-shadow:0 4px 14px rgba(0,0,0,.3);}
-.lorabox .lb-card.lb-off{opacity:.5;}
+.lorabox .lb-card:hover{border-color:#3a3a3d;}
+.lorabox .lb-card.lb-off{opacity:.4;}
 .lorabox .lb-card.lb-dup{border-color:#b9802f;}
 /* explicit text badge so a duplicate isn't conveyed by colour alone */
 .lorabox .lb-card.lb-dup::after{content:"duplicate"; position:absolute; top:-7px; right:10px;
   font-size:8px; line-height:1.4; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
   color:#241a0c; background:#d8932f; padding:1px 6px; border-radius:5px; pointer-events:none;}
 .lorabox .lb-card.lb-dragging{opacity:.45;}
-.lorabox .lb-card.lb-drop-before{box-shadow:inset 0 2px 0 0 var(--p-button-primary-background,#7aa2f0);}
-.lorabox .lb-card.lb-drop-after{box-shadow:inset 0 -2px 0 0 var(--p-button-primary-background,#7aa2f0);}
+.lorabox .lb-card.lb-drop-before{box-shadow:inset 0 2px 0 0 #3b82f6;}
+.lorabox .lb-card.lb-drop-after{box-shadow:inset 0 -2px 0 0 #3b82f6;}
 
-.lorabox .lb-main{display:grid; grid-template-columns:48px minmax(0,1fr); gap:10px; align-items:center; min-width:0;}
-.lorabox .lb-content{min-width:0; display:flex; flex-direction:column; gap:7px;}
+.lorabox .lb-main{display:grid; grid-template-columns:56px minmax(0,1fr); gap:12px; align-items:center; min-width:0;}
+.lorabox .lb-content{min-width:0; display:flex; flex-direction:column; gap:8px;}
 
-/* thumbnail */
-.lorabox .lb-thumb{flex:0 0 auto; width:48px; height:48px; align-self:center; position:relative;
-  border-radius:9px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;
-  background:var(--comfy-menu-bg,#262626); border:1px solid var(--border-color,#3a3a3a);
+/* thumbnail (56×56) — the card's drag handle for reorder, too */
+.lorabox .lb-thumb{flex:0 0 auto; width:56px; height:56px; align-self:center; position:relative;
+  border-radius:6px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  background:var(--comfy-menu-bg,#262626); border:1px solid var(--border-color,#333);
   transition:border-color .12s;}
-.lorabox .lb-thumb:hover{border-color:var(--p-button-primary-background,#5273b8);}
-.lorabox .lb-thumb.drag-over{border-color:var(--p-button-primary-background,#7aa2f0); border-style:dashed;}
-.lorabox .lb-thumb img{width:100%; height:100%; object-fit:cover; display:none;}
+.lorabox .lb-thumb:hover{border-color:#5273b8;}
+.lorabox .lb-thumb.drag-over{border-color:#7aa2f0; border-style:dashed;}
+.lorabox .lb-thumb img{width:100%; height:100%; object-fit:cover; display:none; pointer-events:none;}
 .lorabox .lb-thumb.has-img img{display:block;}
-/* a picture-less thumb shows a faint + ; click it for options (generate/upload),
-   so there are no extra icon buttons cluttering the row. */
-.lorabox .lb-thumb .lb-ph{font-size:20px; line-height:1; color:var(--descrip-text,#6f6f6f); pointer-events:none;}
+.lorabox .lb-thumb .lb-ph{font-size:22px; line-height:1; color:#6f6f6f; pointer-events:none;}
 .lorabox .lb-thumb.has-img .lb-ph{display:none;}
-.lorabox .lb-thumb:hover .lb-ph{color:var(--input-text,#bbb);}
+.lorabox .lb-thumb:hover .lb-ph{color:#bbb;}
 .lorabox .lb-thumb.busy{opacity:.6; animation:lb-pulse 1s ease infinite;}
 @keyframes lb-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 
-/* row line 1: switch · name(grows) · trigger · delete — a GRID with explicit
-   columns so the name never collapses and the icons never drift. */
+/* row line 1: switch · name(grows, borderless) · bookmark · delete */
 .lorabox .lb-l1{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:8px;
-  align-items:center; min-width:0; height:28px;}
+  align-items:center; min-width:0; height:18px;}
 .lorabox .lb-ico svg{display:block;}
-.lorabox .lb-name{display:flex; align-items:center; gap:6px; min-width:0; height:28px;
-  padding:0 10px; cursor:pointer; user-select:none; border-radius:7px;
-  background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
-  border:1px solid transparent; transition:border-color .12s, background .12s;}
-.lorabox .lb-name:hover{background:var(--comfy-menu-bg,#2e2e2e); border-color:var(--border-color,#4a4a4a);}
-.lorabox .lb-name.open{border-color:var(--p-button-primary-background,#6a8fe0);}
-.lorabox .lb-name .txt{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;}
-.lorabox .lb-name .txt.none{color:var(--descrip-text,#888);}
-.lorabox .lb-name .car{flex:0 0 auto; color:var(--descrip-text,#888); font-size:9px;}
-.lorabox .lb-ico{width:24px; height:24px; flex:0 0 auto; padding:0; cursor:pointer; display:flex;
-  align-items:center; justify-content:center; background:transparent; color:var(--descrip-text,#888);
-  border:none; border-radius:7px; font-size:13px; line-height:1; transition:background .12s, color .12s;}
-.lorabox .lb-ico:hover{background:var(--comfy-menu-bg,#3a3a3a); color:var(--input-text,#fff);}
-.lorabox .lb-ico.on{color:var(--p-button-primary-background,#7aa2f0);}
+.lorabox .lb-name{display:flex; align-items:center; min-width:0; height:18px; cursor:pointer;
+  user-select:none; padding:0; background:transparent; border:none; color:#f0f0f0; transition:color .12s;}
+.lorabox .lb-name:hover .txt{color:#fff; text-decoration:underline; text-decoration-color:#555; text-underline-offset:2px;}
+.lorabox .lb-name.open .txt{color:#7aa2f0;}
+.lorabox .lb-name .txt{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:12px; font-weight:500;}
+.lorabox .lb-name .txt.none{color:#888; font-weight:400;}
+.lorabox .lb-ico{width:18px; height:18px; flex:0 0 auto; padding:0; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; background:transparent; color:#888; border:none;
+  border-radius:4px; line-height:1; transition:background .12s, color .12s;}
+.lorabox .lb-ico:hover{background:var(--comfy-menu-bg,#333); color:#e6e6e6;}
+.lorabox .lb-ico.on{color:#3b82f6;}
 .lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
 
-/* row line 2: slider(grows) · number (+ clip) — also a GRID */
-.lorabox .lb-l2{display:grid; grid-template-columns:minmax(0,1fr) 52px; gap:10px; align-items:center; min-width:0; height:24px;}
-.lorabox .lb-l2.sep{grid-template-columns:minmax(0,1fr) 52px auto 52px;}
+/* weight row(s): LABEL · slider(grows, blue fill) · value box */
+.lorabox .lb-wrow{display:grid; grid-template-columns:auto minmax(0,1fr) 36px; gap:8px;
+  align-items:center; min-width:0; height:20px;}
+.lorabox .lb-card.lb-sep .lb-wlbl{min-width:58px;}
+.lorabox .lb-wlbl{font-size:9px; letter-spacing:.04em; text-transform:uppercase; color:#666; white-space:nowrap;}
 .lorabox .lb-slider{-webkit-appearance:none; appearance:none; width:100%; min-width:36px; height:4px;
-  border-radius:3px; background:var(--border-color,#4a4a4a); outline:none; cursor:pointer;}
-.lorabox .lb-slider::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%;
-  background:var(--p-button-primary-background,#3b82f6); border:2px solid var(--comfy-input-bg,#1e1e1e); cursor:pointer;}
-.lorabox .lb-slider::-moz-range-thumb{width:14px; height:14px; border-radius:50%;
-  background:var(--p-button-primary-background,#3b82f6); border:2px solid var(--comfy-input-bg,#1e1e1e); cursor:pointer;}
-.lorabox .lb-num{width:100%; height:24px; padding:0 6px; text-align:center;
-  background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#3a3a3a); border-radius:7px; font-size:11px;
+  border-radius:2px; background:#2a2a2a; outline:none; cursor:pointer;}
+.lorabox .lb-slider::-webkit-slider-thumb{-webkit-appearance:none; width:12px; height:12px; border-radius:50%;
+  background:#fff; border:none; box-shadow:0 0 0 1px rgba(0,0,0,.35); cursor:pointer;}
+.lorabox .lb-slider::-moz-range-thumb{width:12px; height:12px; border-radius:50%; background:#fff; border:none; cursor:pointer;}
+.lorabox .lb-num{width:100%; height:20px; padding:0 6px; text-align:right;
+  background:#0d0d0d; color:#f0f0f0; border:1px solid var(--border-color,#2e2e2e); border-radius:4px; font-size:10px;
   -moz-appearance:textfield; appearance:textfield;}
 .lorabox .lb-num::-webkit-outer-spin-button,
 .lorabox .lb-num::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
-.lorabox .lb-num:focus{outline:none; border-color:var(--p-button-primary-background,#6a8fe0);}
+.lorabox .lb-num:focus{outline:none; border-color:#3b82f6;}
 /* at-a-glance read of the weight: warm for negative ("anti-LoRA"), dim for 0 */
 .lorabox .lb-num.neg{color:#e8855a; border-color:#7a4a36;}
-.lorabox .lb-num.zero{color:var(--descrip-text,#888);}
-.lorabox .lb-clip{flex:0 0 auto; font-size:9px; letter-spacing:.04em; text-transform:uppercase;
-  color:var(--descrip-text,#888); user-select:none;}
+.lorabox .lb-num.zero{color:#888;}
 
-/* trigger editor */
-.lorabox .lb-trig{display:flex; align-items:flex-start; gap:6px; min-width:0;}
-.lorabox .lb-trig-in{flex:1 1 auto; min-width:0; min-height:${TRIG_MIN}px; padding:5px 8px;
-  background:var(--comfy-menu-bg,#202a2e); color:var(--input-text,#dfeef0); resize:none; overflow:hidden;
-  border:1px solid var(--border-color,#3a4a52); border-radius:7px; font-size:11px; line-height:1.4;
+/* trigger editor — a titled panel under the card */
+.lorabox .lb-trig{margin-top:8px; display:flex; flex-direction:column; gap:8px;
+  background:var(--comfy-menu-bg,#161616); border:1px solid var(--border-color,#272727);
+  border-radius:8px; padding:12px;}
+.lorabox .lb-trig-head{display:flex; align-items:center; gap:8px; height:16px;}
+.lorabox .lb-trig-head .t{margin-right:auto; font-size:10px; font-weight:600; letter-spacing:.07em;
+  text-transform:uppercase; color:#6a6a6a;}
+.lorabox .lb-trig-head .lb-ico{width:16px; height:16px;}
+.lorabox .lb-trig-in{width:100%; min-height:${TRIG_MIN}px; padding:8px 10px;
+  background:#0d0d0d; color:#dfeef0; resize:none; overflow:hidden;
+  border:1px solid var(--border-color,#2e2e2e); border-radius:6px; font-size:11px; line-height:1.4;
   outline:none; font-family:inherit;}
-.lorabox .lb-trig-in:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
-.lorabox .lb-trig-in::placeholder{color:var(--descrip-text,#778);}
+.lorabox .lb-trig-in:focus{border-color:#3b82f6;}
+.lorabox .lb-trig-in::placeholder{color:#667;}
 
-/* add button */
-.lorabox .lb-add{height:${ADD_H - 4}px; width:100%; margin-top:2px; display:flex; align-items:center;
-  justify-content:center; gap:7px;
-  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 22%, transparent);
-  color:var(--input-text,#eaf2ff);
-  border:1px solid color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 50%, transparent);
-  border-radius:10px; cursor:pointer; font-size:12px; font-weight:600; letter-spacing:.02em;
-  transition:background .14s, border-color .14s, transform .06s;}
-.lorabox .lb-add:hover{background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 38%, transparent);
-  border-color:var(--p-button-primary-background,#3b82f6);}
+/* add button — dashed outline, calm */
+.lorabox .lb-add{height:36px; width:100%; display:flex; align-items:center; justify-content:center; gap:6px;
+  background:transparent; color:#777; border:1px dashed var(--border-color,#2e2e2e); border-radius:8px;
+  cursor:pointer; font-size:12px; transition:background .14s, border-color .14s, color .14s;}
+.lorabox .lb-add:hover{border-color:#3b82f6; color:#cfe0ff;
+  background:color-mix(in srgb,#3b82f6 8%,transparent);}
 .lorabox .lb-add:active{transform:translateY(1px);}
-.lorabox .lb-add .plus{font-size:15px; font-weight:700; line-height:1; opacity:.9;}
-.lorabox .lb-empty{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-  min-height:${EMPTY_H}px; color:var(--descrip-text,#888); font-size:11px; text-align:center; opacity:.85;}
-.lorabox .lb-empty .lb-empty-t{font-size:10px; opacity:.75;}
+
+/* empty state — icon, headline, hint */
+.lorabox .lb-empty{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+  min-height:${EMPTY_H}px; color:#888; text-align:center;}
+.lorabox .lb-empty .lb-empty-ic{width:40px; height:40px; display:flex; align-items:center; justify-content:center;
+  border-radius:8px; background:var(--comfy-input-bg,#1c1c1c); border:1px solid var(--border-color,#2a2a2a);
+  color:#555; margin-bottom:2px;}
+.lorabox .lb-empty .lb-empty-t{font-size:13px; color:#cfcfcf;}
+.lorabox .lb-empty .lb-empty-s{font-size:11px; color:#777;}
 
 /* searchable lora picker (floating) */
 .lb-pop{position:fixed; z-index:10010; display:flex; flex-direction:column; gap:6px;
   padding:6px; max-height:min(380px, calc(100vh - 24px)); overflow:hidden; border-radius:9px;
-  background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
+  background:var(--comfy-menu-bg,#1c1c1c); border:1px solid var(--border-color,#2e2e2e);
   box-shadow:0 12px 34px rgba(0,0,0,.55); font-family:sans-serif; font-size:12px;
   line-height:1.4; box-sizing:border-box;}
-.lb-pop-search{flex:0 0 auto; height:30px; padding:0 10px; font-size:12px; border-radius:7px; outline:none;
-  background:var(--comfy-input-bg,#1a1a1a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#555); box-sizing:border-box;}
-.lb-pop-search:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
+.lb-pop-search-wrap{position:relative; flex:0 0 auto;}
+.lb-pop-search-wrap .ic{position:absolute; left:10px; top:50%; transform:translateY(-50%);
+  color:#888; pointer-events:none; display:flex;}
+.lb-pop-search{width:100%; height:32px; padding:0 10px 0 32px; font-size:12px; border-radius:7px; outline:none;
+  background:var(--comfy-input-bg,#0d0d0d); color:var(--input-text,#eee);
+  border:1px solid var(--border-color,#2e2e2e); box-sizing:border-box;}
+.lb-pop-search:focus{border-color:#3b82f6;}
 .lb-pop-list{flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto;
   overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
-.lb-pop-group{position:sticky; top:0; z-index:2; padding:5px 9px 3px; margin:0;
+.lb-pop-none{padding:7px 9px; font-size:12px; font-style:italic; color:#888; cursor:pointer; border-radius:6px;}
+.lb-pop-none:hover,.lb-pop-none.hi{background:#1d3a5f; color:#fff;}
+.lb-pop-group{position:sticky; top:0; z-index:2; padding:6px 9px 3px; margin:0;
   font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
-  color:var(--descrip-text,#888); background:var(--comfy-menu-bg,#222);
-  border-bottom:1px solid var(--border-color,#444); pointer-events:none; line-height:1.2;}
-.lb-pop-item{display:block; width:100%; margin:0 0 2px; padding:6px 9px; border-radius:6px;
-  cursor:pointer; font-size:12px; line-height:1.35; min-height:27px; box-sizing:border-box;
-  color:var(--input-text,#ddd); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  background:transparent; border:none; text-align:left; font-family:inherit;}
-.lb-pop-item:hover,.lb-pop-item.hi{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
-.lb-pop-item.sel{outline:1px solid var(--border-color,#666);}
-.lb-pop-empty{padding:8px; color:var(--descrip-text,#888); font-size:11px; font-style:italic;}
+  color:#6a6a6a; background:var(--comfy-menu-bg,#1c1c1c);
+  border-bottom:1px solid var(--border-color,#272727); pointer-events:none; line-height:1.2;}
+.lb-pop-item{display:flex; align-items:center; gap:8px; width:100%; margin:0 0 2px; padding:7px 9px;
+  border-radius:6px; cursor:pointer; font-size:12px; line-height:1.35; min-height:30px; box-sizing:border-box;
+  color:var(--input-text,#ddd); background:transparent; border:none; text-align:left; font-family:inherit;}
+.lb-pop-item .chk{width:16px; height:16px; flex:0 0 auto; color:#3b82f6; visibility:hidden; display:flex;}
+.lb-pop-item.sel .chk{visibility:visible;}
+.lb-pop-item .lbl{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lb-pop-item.sel{background:#1d3a5f; color:#fff;}
+.lb-pop-item:hover,.lb-pop-item.hi{background:#3b82f6; color:#fff;}
+.lb-pop-item:hover .chk,.lb-pop-item.hi .chk{color:#fff;}
+.lb-pop-empty{padding:8px; color:#888; font-size:11px; font-style:italic;}
 .lb-thumb-pop{position:fixed; z-index:10020; padding:4px; border-radius:10px; pointer-events:none;
-  background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
+  background:var(--comfy-menu-bg,#1c1c1c); border:1px solid var(--border-color,#2e2e2e);
   box-shadow:0 12px 36px rgba(0,0,0,.6);}
 .lb-thumb-pop img{display:block; max-width:280px; max-height:280px; border-radius:6px;}
 
-/* generate-preview type menu (Character / Style) */
-.lb-menu{position:fixed; z-index:10015; display:flex; flex-direction:column; gap:2px; padding:5px;
-  min-width:200px; border-radius:9px; background:var(--comfy-menu-bg,#222);
-  border:1px solid var(--border-color,#555); box-shadow:0 12px 34px rgba(0,0,0,.55); font-family:sans-serif;}
-.lb-menu-head{font-size:9px; text-transform:uppercase; letter-spacing:.06em;
-  color:var(--descrip-text,#888); padding:3px 9px 4px;}
-.lb-menu-item{display:flex; flex-direction:column; gap:1px; align-items:flex-start; padding:7px 9px;
+/* thumbnail picture menu (icons + a red destructive item) */
+.lb-menu{position:fixed; z-index:10015; display:flex; flex-direction:column; gap:1px; padding:5px;
+  min-width:220px; border-radius:9px; background:var(--comfy-menu-bg,#1c1c1c);
+  border:1px solid var(--border-color,#2e2e2e); box-shadow:0 12px 34px rgba(0,0,0,.55); font-family:sans-serif;}
+.lb-menu-head{font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:#6a6a6a; padding:5px 9px 5px;}
+.lb-menu-sep{height:1px; margin:4px 0; background:var(--border-color,#272727);}
+.lb-menu-item{display:flex; flex-direction:row; align-items:center; gap:10px; padding:8px 9px;
   border:none; border-radius:6px; background:transparent; color:var(--input-text,#ddd);
-  cursor:pointer; text-align:left; font-family:inherit;}
-.lb-menu-item:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
-.lb-menu-item .t{font-size:12px; font-weight:600;}
-.lb-menu-item .d{font-size:10px; opacity:.8;}
+  cursor:pointer; text-align:left; font-family:inherit; font-size:12px;}
+.lb-menu-item .ic{width:16px; height:16px; flex:0 0 auto; color:#9a9a9a; display:flex;}
+.lb-menu-item:hover{background:#1d3a5f; color:#fff;}
+.lb-menu-item:hover .ic{color:#fff;}
+.lb-menu-item.danger{color:#ef5350;}
+.lb-menu-item.danger .ic{color:#ef5350;}
+.lb-menu-item.danger:hover{background:#5b2b2b; color:#fff;}
+.lb-menu-item.danger:hover .ic{color:#fff;}
 
-/* undo toast */
+/* undo toast — bordered Undo button */
 .lb-toast{position:fixed; left:50%; bottom:26px; transform:translate(-50%,12px); opacity:0; z-index:10030;
   display:flex; align-items:center; gap:14px; padding:10px 15px; border-radius:10px;
-  background:var(--comfy-menu-bg,#232323); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#555); box-shadow:0 12px 36px rgba(0,0,0,.5);
+  background:var(--comfy-menu-bg,#1c1c1c); color:var(--input-text,#eee);
+  border:1px solid var(--border-color,#2e2e2e); box-shadow:0 12px 36px rgba(0,0,0,.5);
   font-size:12px; transition:opacity .18s, transform .18s;}
 .lb-toast.show{opacity:1; transform:translate(-50%,0);}
-.lb-toast-act{background:transparent; border:none; cursor:pointer; font-size:12px; font-weight:700;
-  color:var(--p-button-primary-background,#7aa2f0);}
-.lb-toast-act:hover{text-decoration:underline;}
+.lb-toast-act{background:transparent; border:1px solid #3b5a8a; border-radius:6px; padding:4px 12px;
+  cursor:pointer; font-size:12px; font-weight:600; color:#3b82f6;}
+.lb-toast-act:hover{background:#1d3a5f; color:#fff;}
 `;
     document.head.appendChild(s);
 }
@@ -434,8 +440,28 @@ function injectStyle() {
 const round2 = (v) => (Math.round(v * 100) / 100).toString();
 const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.toggle("zero", v === 0); };
 
+// ── Feather-style line icons used across the panel (match the Figma mockup) ──
+const svg = (inner, sz = 14) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 // a tag glyph for the trigger-words toggle (clearer than the old ⓘ)
-const TAG_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/></svg>';
+const TAG_SVG = svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/>');
+// the Figma card uses a bookmark glyph for the trigger toggle
+const BOOKMARK_SVG = svg('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>');
+const X_SVG = svg('<path d="M18 6 6 18M6 6l12 12"/>');
+const GEAR_SVG = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 16);
+const SEARCH_SVG = svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 16);
+const CHECK_SVG = svg('<path d="M20 6 9 17l-5-5"/>', 16);
+const IMAGE_SVG = svg('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>', 16);
+const UPLOAD_SVG = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>', 16);
+const TRASH_SVG = svg('<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>', 16);
+const LAYERS_SVG = svg('<path d="M12 2 2 7l10 5 10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>', 18);
+const CHEVRON_UP_SVG = svg('<path d="m18 15-6-6-6 6"/>', 16);
+
+// Paint the blue fill on a native range input up to its current value, like the
+// Figma slider (blue left of the thumb, grey track to the right).
+function setSliderFill(slider, v) {
+    const pct = Math.max(0, Math.min(100, ((v - SMIN) / (SMAX - SMIN)) * 100));
+    slider.style.background = `linear-gradient(to right, #3b82f6 0 ${pct}%, #2a2a2a ${pct}% 100%)`;
+}
 // explains how a LoRA weight can be negative (the "minus" people don't expect)
 const STRENGTH_TIP = "Strength: 1.0 = normal, 0 = off, below 0 = anti-LoRA (pushes the image away from this concept), up to 3 = stronger than trained.";
 
@@ -458,11 +484,12 @@ function openMenu(anchor, items) {
             h.className = "lb-menu-head"; h.textContent = it.head;
             m.appendChild(h); return;
         }
+        if (it.sep) { const d = document.createElement("div"); d.className = "lb-menu-sep"; m.appendChild(d); return; }
         const b = document.createElement("button");
-        b.className = "lb-menu-item";
+        b.className = "lb-menu-item" + (it.danger ? " danger" : "");
+        if (it.icon) { const ic = document.createElement("span"); ic.className = "ic"; ic.innerHTML = it.icon; b.appendChild(ic); }
         const t = document.createElement("span"); t.className = "t"; t.textContent = it.label;
         b.appendChild(t);
-        if (it.desc) { const d = document.createElement("span"); d.className = "d"; d.textContent = it.desc; b.appendChild(d); }
         b.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); closeMenu(); it.onPick(); };
         m.appendChild(b);
     });
@@ -576,12 +603,17 @@ async function openPicker(node, row, fieldEl) {
     if (below < 220) pop.style.bottom = (window.innerHeight - rect.top + 4) + "px";
     else pop.style.top = (rect.bottom + 4) + "px";
 
+    const searchWrap = document.createElement("div");
+    searchWrap.className = "lb-pop-search-wrap";
+    const searchIc = document.createElement("span");
+    searchIc.className = "ic"; searchIc.innerHTML = SEARCH_SVG;
     const search = document.createElement("input");
     search.className = "lb-pop-search";
-    search.placeholder = "search lora…";
+    search.placeholder = "Search LoRA…";
+    searchWrap.append(searchIc, search);
     const listEl = document.createElement("div");
     listEl.className = "lb-pop-list";
-    pop.append(search, listEl);
+    pop.append(searchWrap, listEl);
     document.body.appendChild(pop);
     CUR_POP = pop;
     fieldEl.classList.add("open");
@@ -619,7 +651,10 @@ async function openPicker(node, row, fieldEl) {
                 it.type = "button";
                 it.className = "lb-pop-item" + (n === row.name ? " sel" : "");
                 it.dataset.value = n;
-                it.textContent = n === "None" ? "— None —" : n;
+                const chk = document.createElement("span"); chk.className = "chk"; chk.innerHTML = CHECK_SVG;
+                const lbl = document.createElement("span"); lbl.className = "lbl";
+                lbl.textContent = n === "None" ? "— None —" : n;
+                it.append(chk, lbl);
                 it.title = n;
                 it.onmousedown = (e) => { e.preventDefault(); pick(n); };
                 listEl.appendChild(it);
@@ -697,13 +732,16 @@ app.registerExtension({
             head.className = "lb-head";
             const title = document.createElement("span");
             title.className = "lb-title";
-            title.textContent = "Lora Box";
+            title.textContent = "Lora Stack";
+            const actions = document.createElement("div");
+            actions.className = "lb-head-actions";
             const count = document.createElement("span");
             count.className = "lb-count";
             node._lbCount = count;
             const gear = document.createElement("button");
-            gear.className = "lb-gear"; gear.textContent = "⚙"; gear.title = "options";
-            head.append(title, count, gear);
+            gear.className = "lb-gear"; gear.innerHTML = GEAR_SVG; gear.title = "options";
+            actions.append(count, gear);
+            head.append(title, actions);
             inner.appendChild(head);
 
             // ---- options disclosure (mute / model+clip / trigger merge) ----
@@ -712,47 +750,57 @@ app.registerExtension({
             opts.style.display = "none";
             node._lbOpts = opts;
 
-            const row1 = document.createElement("div");
-            row1.className = "lb-opts-row";
-            const muteRow = mkSwitchRow(false, "mute all",
-                "Skip every LoRA and pass the prompt through untouched (state is preserved)",
-                (v) => { node._lbMute = v; applyMute(node); updateActiveCount(node); serialize(node); });
-            node._lbMuteCb = muteRow._cb;
-            const sepRow = mkSwitchRow(false, "model + clip",
-                "Separate model and clip strengths per LoRA",
-                (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
-            node._lbSepCb = sepRow._cb;
-            row1.append(muteRow, sepRow);
+            // a full-width "label … control" row; clicking the label flips a switch
+            const mkOrow = (labelText, ctrl, title) => {
+                const r = document.createElement("div");
+                r.className = "lb-orow"; if (title) r.title = title;
+                const lbl = document.createElement("span");
+                lbl.className = "lb-olbl"; lbl.textContent = labelText;
+                if (ctrl._cb) lbl.onclick = () => { ctrl._cb.checked = !ctrl._cb.checked; ctrl._cb.onchange(); };
+                r.append(lbl, ctrl);
+                return r;
+            };
 
-            const row2 = document.createElement("div");
-            row2.className = "lb-opts-row";
-            row2.title = "Where LoRA trigger words merge into a connected prompt";
-            const tlbl = document.createElement("span");
-            tlbl.className = "lb-lbl"; tlbl.textContent = "triggers";
+            const muteSw = mkSwitch(false, "Skip every LoRA and pass the prompt through untouched (state is preserved)",
+                (v) => { node._lbMute = v; applyMute(node); updateActiveCount(node); serialize(node); }, true);
+            node._lbMuteCb = muteSw._cb;
+            const sepSw = mkSwitch(false, "Separate model and clip strengths per LoRA",
+                (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); }, true);
+            node._lbSepCb = sepSw._cb;
+
+            const sec = document.createElement("div");
+            sec.className = "lb-sec"; sec.textContent = "Triggers";
+
             const sel = document.createElement("select");
-            [["end", "at end of prompt"], ["beginning", "at start of prompt"]].forEach(([v, t]) => {
+            [["beginning", "Start"], ["end", "End"]].forEach(([v, t]) => {
                 const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
             });
             sel.value = node._lbPos || "beginning";
             sel.onchange = () => { node._lbPos = sel.value; serialize(node); };
             stop(sel); eatWheel(sel);
             node._lbPosSel = sel;
-            const dlbl = document.createElement("span");
-            dlbl.className = "lb-lbl"; dlbl.textContent = "sep";
+
             const delim = document.createElement("input");
             delim.className = "lb-delim"; delim.value = node._lbDelim != null ? node._lbDelim : ", ";
             delim.title = "delimiter between prompt and trigger words";
             delim.onchange = () => { node._lbDelim = delim.value; serialize(node); };
             stop(delim); eatWheel(delim);
             node._lbDelimIn = delim;
-            row2.append(tlbl, sel, dlbl, delim);
 
             const hint = document.createElement("div");
             hint.className = "lb-hint";
             hint.innerHTML = "Trigger words are the keywords a LoRA was trained on. If you wire a " +
                 "prompt in, they're added at the <b>start</b> (stronger emphasis) or the " +
-                "<b>end</b> (a softer modifier). “sep” is what goes between them.";
-            opts.append(row1, row2, hint);
+                "<b>end</b> (a softer modifier). “Sep” is what goes between them.";
+
+            opts.append(
+                mkOrow("Mute all", muteSw, "Skip every LoRA and pass the prompt through untouched"),
+                mkOrow("Model + Clip", sepSw, "Separate model and clip strengths per LoRA"),
+                sec,
+                mkOrow("Set at start of prompt", sel, "Where LoRA trigger words merge into a connected prompt"),
+                mkOrow("Sep", delim, "Delimiter between prompt and trigger words"),
+                hint,
+            );
             inner.appendChild(opts);
 
             gear.onclick = (e) => {
@@ -771,7 +819,7 @@ app.registerExtension({
 
             const add = document.createElement("button");
             add.className = "lb-add";
-            add.innerHTML = '<span class="plus">+</span><span>Add LoRA</span>';
+            add.textContent = "+ Add LoRA";
             add.onclick = (e) => {
                 e.stopPropagation();
                 node._lbRows.push({ on: true, name: "None", sm: 1.0, sc: 1.0 });
@@ -833,10 +881,10 @@ function scheduleInit(node) {
     node._lbInitT = setTimeout(() => { node._lbInitT = 0; initFromData(node); }, 0);
 }
 
-/* a styled on/off switch (label > input + track + knob) */
-function mkSwitch(checked, title, onChange) {
+/* a styled on/off switch (label > input + track + knob); lg = bigger (options) */
+function mkSwitch(checked, title, onChange, lg) {
     const l = document.createElement("label");
-    l.className = "lb-switch"; l.title = title || "";
+    l.className = "lb-switch" + (lg ? " lg" : ""); l.title = title || "";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!checked;
     const track = document.createElement("span"); track.className = "track";
     const knob = document.createElement("span"); knob.className = "knob";
@@ -845,19 +893,6 @@ function mkSwitch(checked, title, onChange) {
     stop(l);
     l._cb = cb;
     return l;
-}
-
-/* a switch plus a clickable text label, for the options panel */
-function mkSwitchRow(checked, label, title, onChange) {
-    const wrap = document.createElement("div");
-    wrap.className = "lb-swrow"; wrap.title = title || "";
-    const sw = mkSwitch(checked, title, onChange);
-    const txt = document.createElement("span");
-    txt.textContent = label;
-    txt.onclick = () => { sw._cb.checked = !sw._cb.checked; sw._cb.onchange(); };
-    wrap.append(sw, txt);
-    wrap._cb = sw._cb;
-    return wrap;
 }
 
 function updateActiveCount(node) {
@@ -1008,7 +1043,10 @@ function renderRows(node) {
     if (node._lbRows.length === 0) {
         const e = document.createElement("div");
         e.className = "lb-empty";
-        e.innerHTML = '<span>No LoRAs yet</span><span class="lb-empty-t">press “+ Add LoRA” below</span>';
+        const ic = document.createElement("div"); ic.className = "lb-empty-ic"; ic.innerHTML = LAYERS_SVG;
+        const t = document.createElement("div"); t.className = "lb-empty-t"; t.textContent = "No LoRAs yet";
+        const sub = document.createElement("div"); sub.className = "lb-empty-s"; sub.textContent = "Press + Add LoRA to get started";
+        e.append(ic, t, sub);
         list.appendChild(e);
         updateActiveCount(node);
         return;
@@ -1016,13 +1054,9 @@ function renderRows(node) {
 
     node._lbRows.forEach((row, i) => {
         const card = document.createElement("div");
-        card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "");
+        card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "") + (node._lbSep ? " lb-sep" : "");
 
-        // the coloured left bar doubles as the drag handle
-        const stripe = document.createElement("div");
-        stripe.className = "lb-stripe"; stripe.title = "drag to reorder";
-        attachReorder(node, card, stripe, i);
-
+        // ── line 1: switch · name (borderless text) · bookmark · delete ──
         const l1 = document.createElement("div");
         l1.className = "lb-l1";
 
@@ -1036,19 +1070,18 @@ function renderRows(node) {
         const txt = document.createElement("span");
         txt.className = "txt" + (!row.name || row.name === "None" ? " none" : "");
         txt.textContent = row.name && row.name !== "None" ? row.name : "Choose a LoRA…";
-        const car = document.createElement("span"); car.className = "car"; car.textContent = "▼";
-        field.append(txt, car);
+        field.append(txt);
         field.onclick = (e) => { e.stopPropagation(); openPicker(node, row, field); };
         stop(field);
 
         const trig = document.createElement("button");
-        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.innerHTML = TAG_SVG;
+        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.innerHTML = BOOKMARK_SVG;
         trig.title = "trigger words — the keywords this LoRA responds to";
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
         stop(trig);
 
         const del = document.createElement("button");
-        del.className = "lb-ico lb-del"; del.textContent = "✕"; del.title = "remove this LoRA";
+        del.className = "lb-ico lb-del"; del.innerHTML = X_SVG; del.title = "remove this LoRA";
         del.onclick = (e) => {
             e.stopPropagation();
             const removed = node._lbRows[i], at = i;
@@ -1063,34 +1096,48 @@ function renderRows(node) {
 
         l1.append(sw, field, trig, del);
 
-        const l2 = document.createElement("div");
-        l2.className = "lb-l2" + (node._lbSep ? " sep" : "");
-
-        const slider = document.createElement("input");
-        slider.className = "lb-slider"; slider.type = "range";
-        slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm);
-        slider.title = STRENGTH_TIP;
-        const num = mkNum(row.sm, (node._lbSep ? "Model strength. " : "") + STRENGTH_TIP,
-            (v) => { row.sm = v; slider.value = String(v); serialize(node); });
-        slider.oninput = () => { row.sm = clampS(parseFloat(slider.value)); num.value = round2(row.sm); tintNum(num, row.sm); serialize(node); };
-        stop(slider); eatWheel(slider);
-
-        l2.append(slider, num);
-        if (node._lbSep) {
-            const tag = document.createElement("span"); tag.className = "lb-clip"; tag.textContent = "clip";
-            const cnum = mkNum(row.sc != null ? row.sc : row.sm, "CLIP strength. " + STRENGTH_TIP, (v) => { row.sc = v; serialize(node); });
-            l2.append(tag, cnum);
-        }
+        // ── weight row(s): LABEL · slider (blue fill) · value box ──
+        const mkWeightRow = (label, value, onChange) => {
+            const r = document.createElement("div");
+            r.className = "lb-wrow";
+            const lbl = document.createElement("span"); lbl.className = "lb-wlbl"; lbl.textContent = label;
+            const slider = document.createElement("input");
+            slider.className = "lb-slider"; slider.type = "range";
+            slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(value);
+            slider.title = STRENGTH_TIP;
+            setSliderFill(slider, value);
+            const num = mkNum(value, label.replace("WEIGHT", "strength") + ". " + STRENGTH_TIP, (v) => {
+                slider.value = String(v); setSliderFill(slider, v); onChange(v);
+            });
+            slider.oninput = () => {
+                const v = clampS(parseFloat(slider.value));
+                num.value = round2(v); tintNum(num, v); setSliderFill(slider, v); onChange(v);
+            };
+            stop(slider); eatWheel(slider);
+            r.append(lbl, slider, num);
+            return r;
+        };
 
         const content = document.createElement("div");
         content.className = "lb-content";
-        content.append(l1, l2);
+        content.append(l1);
+        if (node._lbSep) {
+            content.append(
+                mkWeightRow("MODEL WEIGHT", row.sm, (v) => { row.sm = v; serialize(node); }),
+                mkWeightRow("CLIP WEIGHT", row.sc != null ? row.sc : row.sm, (v) => { row.sc = v; serialize(node); }),
+            );
+        } else {
+            content.append(mkWeightRow("WEIGHT", row.sm, (v) => { row.sm = v; serialize(node); }));
+        }
+
+        const thumb = buildThumb(node, row);
+        attachReorder(node, card, thumb, i);   // drag the picture to reorder
 
         const main = document.createElement("div");
         main.className = "lb-main";
-        main.append(buildThumb(node, row), content);
+        main.append(thumb, content);
 
-        card.append(stripe, main);
+        card.append(main);
         if (row._open) card.append(buildTrigEditor(node, row));
 
         list.appendChild(card);
@@ -1108,7 +1155,7 @@ function renderRows(node) {
 function buildThumb(node, row) {
     const thumb = document.createElement("div");
     thumb.className = "lb-thumb";
-    thumb.title = "Picture for this LoRA — click for options";
+    thumb.title = "Picture for this LoRA — click for options, drag to reorder";
     const img = document.createElement("img");
     const ph = document.createElement("div");
     ph.className = "lb-ph"; ph.textContent = "＋";
@@ -1164,21 +1211,24 @@ function buildThumb(node, row) {
         if (needLora()) return;
         const items = [
             { head: "Picture for this LoRA" },
-            { label: "Generate — Character", desc: "a portrait, for character LoRAs", onPick: () => doGen("character") },
-            { label: "Generate — Style", desc: "a scene, for style LoRAs", onPick: () => doGen("style") },
-            { label: "Upload an image…", onPick: pickFile },
+            { label: "Generate — Character", icon: IMAGE_SVG, onPick: () => doGen("character") },
+            { label: "Generate — Style", icon: IMAGE_SVG, onPick: () => doGen("style") },
+            { sep: true },
+            { label: "Upload an image…", icon: UPLOAD_SVG, onPick: pickFile },
         ];
         if (thumb.classList.contains("has-img")) {
             items.push({
-                label: "Remove picture", onPick: async () => {
+                label: "Remove picture", icon: TRASH_SVG, danger: true, onPick: async () => {
                     closeThumbPop(); await deletePreview(row.name); evictPreview(row.name); refresh();
                 }
             });
         }
         openMenu(thumb, items);
     };
-    // drag & drop an image straight onto the thumbnail
+    // drag & drop an image straight onto the thumbnail (skip while an internal
+    // reorder drag is in flight — that's handled by the card, not the picture)
     thumb.addEventListener("dragover", (e) => {
+        if (LB_DRAG_FROM !== null) return;
         if (!row.name || row.name === "None") return;
         e.preventDefault(); e.stopPropagation();
         thumb.classList.add("drag-over");
@@ -1186,6 +1236,7 @@ function buildThumb(node, row) {
     });
     thumb.addEventListener("dragleave", () => thumb.classList.remove("drag-over"));
     thumb.addEventListener("drop", (e) => {
+        if (LB_DRAG_FROM !== null) return;
         if (!row.name || row.name === "None") return;
         e.preventDefault(); e.stopPropagation();
         thumb.classList.remove("drag-over");
@@ -1201,12 +1252,22 @@ function buildThumb(node, row) {
 function buildTrigEditor(node, row) {
     const wrap = document.createElement("div");
     wrap.className = "lb-trig";
+
+    const header = document.createElement("div");
+    header.className = "lb-trig-head";
+    const htxt = document.createElement("span"); htxt.className = "t"; htxt.textContent = "Triggers";
+    const reset = document.createElement("button");
+    reset.className = "lb-ico"; reset.textContent = "↺"; reset.title = "reset to auto-detected";
+    const chev = document.createElement("button");
+    chev.className = "lb-ico"; chev.innerHTML = CHEVRON_UP_SVG; chev.title = "collapse";
+    chev.onclick = (e) => { e.stopPropagation(); row._open = false; renderRows(node); sizeNode(node); };
+    stop(chev);
+    header.append(htxt, reset, chev);
+
     const ta = document.createElement("textarea");
     ta.className = "lb-trig-in";
     ta.rows = 1;
     ta.placeholder = "trigger words (comma separated)…";
-    const reset = document.createElement("button");
-    reset.className = "lb-ico"; reset.textContent = "↺"; reset.title = "reset to auto-detected";
 
     const grow = () => {
         ta.style.height = "auto";
@@ -1238,7 +1299,7 @@ function buildTrigEditor(node, row) {
         grow();
     };
     stop(ta); eatWheel(ta); stop(reset);
-    wrap.append(ta, reset);
+    wrap.append(header, ta);
     return wrap;
 }
 

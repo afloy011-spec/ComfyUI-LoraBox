@@ -523,6 +523,6 @@ NODE_CLASS_MAPPINGS = {
     "LoraBoxPromptMerge": LoraBoxPromptMerge,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LoraBox": "Afloy Lora Box",
+    "LoraBox": "Afloy LoRA Box",
     "LoraBoxPromptMerge": "Prompt + Triggers (Lora Box)",
 }
