@@ -27,9 +27,9 @@ const GAP = 8, MIN_W = 240, FIXED_W = 380;
 // trigger editor is a titled panel (TRIG_HEAD + padding). All deterministic.
 const PAD_V = 18, HEAD_H = 40, OPTS_H = 208, CARD_BASE = 80, SEP_EXTRA = 26, ADD_H = 38, EMPTY_H = 86, BUFFER = 8;
 const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 18, TRIG_MIN = 28;
-// Allow negative ("anti-LoRA") and >1 weights for parity with rgthree / the
-// core loader. Default still sits at 1.0; clamp keeps it sane.
-const SMIN = -3, SMAX = 3;
+// Strength range 0…2 (default 1.0 = normal, sits in the middle of the slider,
+// matching the Figma mockup). 0 = off, 2 = strongest.
+const SMIN = 0, SMAX = 2;
 const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
 
 let LORA_LIST = null;
@@ -464,8 +464,7 @@ function setSliderFill(slider, v) {
     const pct = Math.max(0, Math.min(100, ((v - SMIN) / (SMAX - SMIN)) * 100));
     slider.style.background = `linear-gradient(to right, #3b82f6 0 ${pct}%, #2a2a2a ${pct}% 100%)`;
 }
-// explains how a LoRA weight can be negative (the "minus" people don't expect)
-const STRENGTH_TIP = "Strength: 1.0 = normal, 0 = off, below 0 = anti-LoRA (pushes the image away from this concept), up to 3 = stronger than trained.";
+const STRENGTH_TIP = "Strength: 0 = off, 1 = normal, up to 2 = stronger than trained.";
 
 /* ---- small floating text menu (thumbnail picture options) --------------- */
 let MENU = null;
