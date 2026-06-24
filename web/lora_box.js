@@ -2,17 +2,27 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 /*
- * Afloy Lora Box UI — DOM-widget panel.
- *  - Height computed deterministically (no live measurement) except the trigger
- *    editor, whose textarea auto-grows; its measured height feeds back into the
- *    deterministic total so the card expands downward to show all words.
- *  - All pointer/wheel events are swallowed at the container so dragging a
- *    slider never leaks to the canvas (which used to "break" the container).
- *  - Strength range 0..2. Trigger words auto-detected + fully editable.
+ * Afloy Lora Box UI — DOM-widget panel (clean-minimal redesign).
+ *
+ * Design principles (high-rated 2026 apps — Linear / Vercel / Raycast):
+ *  - clarity over cleverness: every control is labelled or has a tooltip;
+ *  - calm by default: secondary settings (mute / model+clip / trigger merge)
+ *    live behind a ⚙ disclosure, not in your face;
+ *  - direct manipulation, reversible: delete shows an Undo toast;
+ *  - one accent colour, an 8px spacing rhythm, restrained motion;
+ *  - stable DOM: preview images are cached so a re-render never flickers.
+ *
+ * Hard-won stability rules kept intact:
+ *  - height is computed DETERMINISTICALLY (no live measurement) except the
+ *    trigger editor, whose grown textarea height feeds back into the total;
+ *  - pointerdown + wheel are swallowed at the container, touch is swallowed
+ *    globally in capture phase — a slider drag never leaks to litegraph;
+ *  - we never intercept pointermove (that froze DOM repositioning);
+ *  - width is the framework's to manage; we only drive height.
  */
 
 const GAP = 8, MIN_W = 240, FIXED_W = 380;
-const ROOT_PAD = 16, INNER_GAP = 16, HEAD_H = 20, HEAD2_H = 28, CARD_BASE = 76, ADD_H = 36, BUFFER = 8;
+const PAD_V = 18, HEAD_H = 24, OPTS_H = 116, CARD_BASE = 80, ADD_H = 34, EMPTY_H = 46, BUFFER = 8;
 const TRIG_GAP = 8, TRIG_MIN = 28;
 // Allow negative ("anti-LoRA") and >1 weights for parity with rgthree / the
 // core loader. Default still sits at 1.0; clamp keeps it sane.
@@ -88,7 +98,8 @@ function evictPreview(name) {
     PREVIEW_PROMISES.delete(name);
 }
 
-// Resolve a lora's sidecar preview as an object URL, or null if none.
+// Resolve a lora's preview as an object URL (server finds a manual sidecar OR
+// the lora's own <name>.preview.png), or null if none.
 async function loadPreviewURL(name) {
     if (!name || name === "None") return null;
     if (PREVIEW_CACHE.has(name)) return PREVIEW_CACHE.get(name);
@@ -119,6 +130,23 @@ async function deletePreview(name) {
     catch (e) {}
 }
 
+// Render a quick preview on the GPU (Z-Image test) and save it as the sidecar.
+async function generatePreview(name, kind = "character") {
+    if (!name || name === "None") return { ok: false, error: "no lora selected" };
+    const url = "/lorabox/preview/generate?file=" + encodeURIComponent(name) + "&kind=" + encodeURIComponent(kind);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 190000);
+    try {
+        const r = await api.fetchApi(url, { method: "POST", signal: ctrl.signal });
+        return await r.json();
+    } catch (e) {
+        if (e && e.name === "AbortError") return { ok: false, error: "timed out (3 min)" };
+        return { ok: false, error: String(e) };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 /* floating enlarged preview on hover */
 let THUMB_POP = null;
 function closeThumbPop() { if (THUMB_POP) { THUMB_POP.remove(); THUMB_POP = null; } }
@@ -146,6 +174,32 @@ function openThumbPop(anchorEl, url) {
     if (img.complete) place(); else img.onload = place;
 }
 
+/* ---- undo toast (Gmail / Linear pattern) -------------------------------- */
+let LB_TOAST = null, LB_TOAST_T = null;
+function closeToast() {
+    if (LB_TOAST_T) { clearTimeout(LB_TOAST_T); LB_TOAST_T = null; }
+    if (LB_TOAST) { LB_TOAST.remove(); LB_TOAST = null; }
+}
+function showToast(msg, actionLabel, onAction, ms = 6000) {
+    closeToast();
+    const t = document.createElement("div");
+    t.className = "lb-toast";
+    const m = document.createElement("span");
+    m.textContent = msg;
+    t.appendChild(m);
+    if (actionLabel) {
+        const b = document.createElement("button");
+        b.className = "lb-toast-act";
+        b.textContent = actionLabel;
+        b.onclick = () => { closeToast(); onAction && onAction(); };
+        t.appendChild(b);
+    }
+    document.body.appendChild(t);
+    LB_TOAST = t;
+    requestAnimationFrame(() => t.classList.add("show"));
+    LB_TOAST_T = setTimeout(closeToast, ms);
+}
+
 function injectStyle() {
     const old = document.getElementById("lorabox-style");
     if (old) old.remove();
@@ -155,89 +209,152 @@ function injectStyle() {
 .lorabox-root{width:100%; height:100%; overflow:hidden; box-sizing:border-box;}
 .lorabox{width:100%; display:flex; flex-direction:column;
   font-family:inherit; font-size:12px; color:var(--input-text,#ddd);
-  padding:6px 10px 10px; gap:8px; box-sizing:border-box;}
+  padding:8px 10px 10px; gap:${GAP}px; box-sizing:border-box;}
 .lorabox *{box-sizing:border-box;}
-.lorabox .lb-head{display:flex; align-items:center; gap:18px; min-height:16px;
-  color:var(--descrip-text,#9a9a9a); font-size:11px;}
-.lorabox .lb-head label{display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;}
-.lorabox .lb-head input{accent-color:var(--p-button-primary-background,#3b82f6); cursor:pointer; margin:0;}
-.lorabox .lb-head2{display:flex; align-items:center; gap:8px; min-height:24px;
-  color:var(--descrip-text,#9a9a9a); font-size:11px;}
-.lorabox .lb-head2 .lb-h2lbl{opacity:.85; user-select:none;}
-.lorabox .lb-head2 select{flex:1 1 auto; min-width:0; height:24px; padding:0 6px; cursor:pointer;
+
+/* header: title + live count + options disclosure */
+.lorabox .lb-head{display:flex; align-items:center; gap:8px; height:${HEAD_H}px;}
+.lorabox .lb-title{display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700;
+  letter-spacing:.01em; color:var(--input-text,#ececec); user-select:none;}
+.lorabox .lb-title .em{font-size:13px;}
+.lorabox .lb-count{margin-left:auto; font-size:10px; font-weight:600; white-space:nowrap;
+  padding:2px 8px; border-radius:10px;
+  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 16%, transparent);
+  color:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 70%, #fff);}
+.lorabox .lb-count.muted{background:color-mix(in srgb, #b9802f 22%, transparent); color:#e7ad5e;}
+.lorabox .lb-gear{width:24px; height:24px; flex:0 0 auto; display:flex; align-items:center;
+  justify-content:center; background:transparent; border:none; border-radius:7px; cursor:pointer;
+  color:var(--descrip-text,#9a9a9a); font-size:14px; line-height:1; transition:background .12s,color .12s;}
+.lorabox .lb-gear:hover{background:var(--comfy-menu-bg,#3a3a3a); color:var(--input-text,#fff);}
+.lorabox .lb-gear.on{color:var(--p-button-primary-background,#7aa2f0);
+  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 18%, transparent);}
+
+/* options disclosure */
+.lorabox .lb-opts{display:flex; flex-direction:column; gap:9px; padding:10px 11px;
+  background:var(--comfy-input-bg,#1b1b1b); border:1px solid var(--border-color,#333); border-radius:10px;}
+.lorabox .lb-opts-row{display:flex; align-items:center; gap:16px; flex-wrap:wrap; min-height:18px;}
+.lorabox .lb-opts .lb-swrow{display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;
+  font-size:11px; color:var(--descrip-text,#bdbdbd);}
+.lorabox .lb-opts .lb-lbl{font-size:11px; color:var(--descrip-text,#9a9a9a); user-select:none;}
+.lorabox .lb-opts select{flex:1 1 auto; min-width:0; height:24px; padding:0 6px; cursor:pointer;
   background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#4a4a4a); border-radius:6px; font-size:11px; outline:none;}
-.lorabox .lb-head2 select:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
-.lorabox .lb-head2 input.lb-delim{width:48px; height:24px; text-align:center;
+  border:1px solid var(--border-color,#4a4a4a); border-radius:7px; font-size:11px; outline:none;}
+.lorabox .lb-opts select:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
+.lorabox .lb-opts input.lb-delim{width:52px; height:24px; text-align:center;
   background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#4a4a4a); border-radius:6px; font-size:11px; outline:none;}
-.lorabox .lb-head2 input.lb-delim:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
+  border:1px solid var(--border-color,#4a4a4a); border-radius:7px; font-size:11px; outline:none;}
+.lorabox .lb-opts input.lb-delim:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
+.lorabox .lb-opts .lb-hint{font-size:10px; line-height:1.45; color:var(--descrip-text,#888);}
+.lorabox .lb-opts .lb-hint b{color:var(--descrip-text,#b5b5b5); font-weight:600;}
+
+/* toggle switch */
+.lb-switch{position:relative; width:30px; height:18px; flex:0 0 auto; cursor:pointer; display:inline-block;}
+.lb-switch input{position:absolute; inset:0; opacity:0; margin:0; cursor:pointer;}
+.lb-switch .track{position:absolute; inset:0; border-radius:9px; background:var(--border-color,#4a4a4a);
+  transition:background .15s;}
+.lb-switch .knob{position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%;
+  background:#e6e6e6; transition:transform .15s; pointer-events:none;
+  box-shadow:0 1px 2px rgba(0,0,0,.4);}
+.lb-switch input:checked + .track{background:var(--p-button-primary-background,#3b82f6);}
+.lb-switch input:checked ~ .knob{transform:translateX(12px);}
+
+/* list + cards */
 .lorabox .lb-list{display:flex; flex-direction:column; gap:${GAP}px;}
-.lorabox .lb-card{position:relative; display:flex; flex-direction:column; gap:6px; min-width:0;
-  padding:8px 9px 8px 13px; border-radius:10px;
+.lorabox .lb-card{position:relative; display:flex; flex-direction:column; gap:7px; min-width:0;
+  padding:9px 10px 9px 17px; border-radius:11px;
   background:linear-gradient(180deg, var(--comfy-input-bg,#1e1e1e),
-    color-mix(in srgb, var(--comfy-input-bg,#1e1e1e) 84%, #000));
-  border:1px solid var(--border-color,#3a3a3a);
+    color-mix(in srgb, var(--comfy-input-bg,#1e1e1e) 85%, #000));
+  border:1px solid var(--border-color,#363636);
   transition:opacity .14s, border-color .14s, box-shadow .14s;}
-/* left accent stripe = "this lora is active"; non-color cue is its presence */
-.lorabox .lb-card::before{content:""; position:absolute; left:0; top:8px; bottom:8px; width:3px;
-  border-radius:0 3px 3px 0; background:var(--p-button-primary-background,#3b82f6);
-  opacity:.9; transition:opacity .14s, background .14s;}
-.lorabox .lb-card.lb-off::before{opacity:0;}
-.lorabox .lb-card:hover{border-color:var(--p-button-primary-background,#5a7fd0);
-  box-shadow:0 3px 12px rgba(0,0,0,.28);}
+/* the left bar IS the drag handle — grab it to reorder. Blue = active,
+   grey = disabled, so the colour also doubles as the on/off cue. */
+.lorabox .lb-stripe{position:absolute; left:0; top:0; bottom:0; width:13px; cursor:grab;
+  display:flex; align-items:center;}
+.lorabox .lb-stripe::after{content:""; width:4px; height:calc(100% - 18px); border-radius:0 4px 4px 0;
+  background:var(--p-button-primary-background,#3b82f6); transition:background .14s, width .12s;}
+.lorabox .lb-card.lb-off .lb-stripe::after{background:var(--border-color,#5a5a5a);}
+.lorabox .lb-card.lb-dup .lb-stripe::after{background:#d8932f;}
+.lorabox .lb-stripe:hover::after{width:6px;}
+.lorabox .lb-stripe:active{cursor:grabbing;}
+.lorabox .lb-card:hover{border-color:var(--p-button-primary-background,#5273b8);
+  box-shadow:0 4px 14px rgba(0,0,0,.3);}
 .lorabox .lb-card.lb-off{opacity:.5;}
 .lorabox .lb-card.lb-dup{border-color:#b9802f;}
-.lorabox .lb-card.lb-dup::before{background:#d8932f; opacity:1;}
-.lorabox .lb-card.lb-dup .lb-name{border-color:#b9802f;}
-/* explicit text badge so the duplicate state isn't conveyed by colour alone */
-.lorabox .lb-card.lb-dup::after{content:"duplicate"; position:absolute; top:-7px; right:9px;
+/* explicit text badge so a duplicate isn't conveyed by colour alone */
+.lorabox .lb-card.lb-dup::after{content:"duplicate"; position:absolute; top:-7px; right:10px;
   font-size:8px; line-height:1.4; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
   color:#241a0c; background:#d8932f; padding:1px 6px; border-radius:5px; pointer-events:none;}
-.lorabox .lb-main{display:flex; gap:9px; align-items:stretch; min-width:0;}
-.lorabox .lb-content{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:6px;}
-.lorabox .lb-thumb{flex:0 0 auto; width:54px; height:54px; align-self:center; position:relative;
-  border-radius:8px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;
-  background:var(--comfy-menu-bg,#2a2a2a); border:1px solid var(--border-color,#4a4a4a);
+.lorabox .lb-card.lb-dragging{opacity:.45;}
+.lorabox .lb-card.lb-drop-before{box-shadow:inset 0 2px 0 0 var(--p-button-primary-background,#7aa2f0);}
+.lorabox .lb-card.lb-drop-after{box-shadow:inset 0 -2px 0 0 var(--p-button-primary-background,#7aa2f0);}
+
+.lorabox .lb-main{display:flex; gap:10px; align-items:center; min-width:0;}
+.lorabox .lb-content{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:7px;}
+
+/* thumbnail */
+.lorabox .lb-thumb{flex:0 0 auto; width:48px; height:48px; align-self:center; position:relative;
+  border-radius:9px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  background:var(--comfy-menu-bg,#262626); border:1px solid var(--border-color,#3a3a3a);
   transition:border-color .12s;}
-.lorabox .lb-thumb:hover{border-color:var(--p-button-primary-background,#5a7fd0);}
+.lorabox .lb-thumb:hover{border-color:var(--p-button-primary-background,#5273b8);}
+.lorabox .lb-thumb.drag-over{border-color:var(--p-button-primary-background,#7aa2f0); border-style:dashed;}
 .lorabox .lb-thumb img{width:100%; height:100%; object-fit:cover; display:none;}
 .lorabox .lb-thumb.has-img img{display:block;}
-.lorabox .lb-thumb .lb-ph{display:flex; flex-direction:column; align-items:center; gap:2px;
-  color:var(--descrip-text,#888); font-size:16px; line-height:1; pointer-events:none;}
-.lorabox .lb-thumb .lb-ph .lb-ph-t{font-size:8px; letter-spacing:.02em; opacity:.85;}
-.lorabox .lb-thumb.has-img .lb-ph{display:none;}
-.lorabox .lb-thumb .lb-thumb-x{position:absolute; top:2px; right:2px; width:16px; height:16px;
-  display:none; align-items:center; justify-content:center; font-size:10px; border-radius:4px;
-  background:rgba(0,0,0,.62); color:#fff; line-height:1;}
-.lorabox .lb-thumb.has-img:hover .lb-thumb-x{display:flex;}
-.lorabox .lb-thumb .lb-thumb-x:hover{background:#7a2b2b;}
-.lorabox .lb-l1{display:grid; grid-template-columns:14px 18px 1fr 26px 26px; gap:6px; align-items:center; min-width:0;}
-.lorabox .lb-drag{width:14px; height:26px; display:flex; align-items:center; justify-content:center;
-  cursor:grab; color:var(--descrip-text,#777); font-size:12px; line-height:1; user-select:none; flex:0 0 auto;}
-.lorabox .lb-drag:hover{color:var(--input-text,#ccc);}
-.lorabox .lb-drag:active{cursor:grabbing;}
-.lorabox .lb-card.lb-dragging{opacity:.5;}
-.lorabox .lb-card.lb-drop-before{box-shadow:inset 0 2px 0 0 var(--p-button-primary-background,#5a7fd0);}
-.lorabox .lb-card.lb-drop-after{box-shadow:inset 0 -2px 0 0 var(--p-button-primary-background,#5a7fd0);}
-.lorabox .lb-l2{display:grid; grid-template-columns:1fr 56px; gap:8px; align-items:center; min-width:0;}
-.lorabox .lb-l2.sep{grid-template-columns:minmax(40px,1fr) 54px 26px 54px;}
-.lorabox .lb-en{width:18px; height:18px; margin:0; cursor:pointer; justify-self:center;
-  accent-color:var(--p-button-primary-background,#3b82f6);}
-.lorabox .lb-name{display:flex; align-items:center; gap:6px; width:100%; min-width:0; height:26px;
-  padding:0 8px; cursor:pointer; user-select:none;
-  background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#4a4a4a); border-radius:6px;}
-.lorabox .lb-name:hover{border-color:var(--p-button-primary-background,#5a7fd0);}
+/* empty state: two labelled buttons — Generate / Add — so it is obvious how to
+   give a picture-less LoRA a preview (this is the whole "how do I generate?"). */
+.lorabox .lb-thumb-acts{position:absolute; inset:0; display:none; flex-direction:column;
+  background:var(--comfy-menu-bg,#262626);}
+.lorabox .lb-thumb:not(.has-img) .lb-thumb-acts{display:flex;}
+.lorabox .lb-thumb-btn{flex:1; display:flex; align-items:center; justify-content:center; gap:4px;
+  cursor:pointer; color:var(--descrip-text,#bcbcbc); font-size:8px; letter-spacing:.03em;
+  text-transform:uppercase; user-select:none; transition:background .12s, color .12s;}
+.lorabox .lb-thumb-btn:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
+.lorabox .lb-thumb-btn .i{font-size:12px;}
+.lorabox .lb-thumb-btn + .lb-thumb-btn{border-top:1px solid var(--border-color,#3a3a3a);}
+.lorabox .lb-thumb-btn.busy{pointer-events:none; animation:lb-pulse 1s ease infinite;}
+@keyframes lb-pulse{0%,100%{opacity:.55}50%{opacity:1}}
+/* image state: small corner chips on hover (regenerate / replace / remove) */
+.lorabox .lb-thumb-chip{position:absolute; width:16px; height:16px; display:none; align-items:center;
+  justify-content:center; font-size:10px; line-height:1; border-radius:5px; cursor:pointer;
+  background:rgba(0,0,0,.62); color:#fff;}
+.lorabox .lb-thumb.has-img:hover .lb-thumb-chip{display:flex;}
+.lorabox .lb-thumb-chip.x{top:2px; right:2px;}
+.lorabox .lb-thumb-chip.x:hover{background:#7a2b2b;}
+.lorabox .lb-thumb-chip.gen{bottom:2px; right:2px;}
+.lorabox .lb-thumb-chip.rep{bottom:2px; left:2px;}
+.lorabox .lb-thumb-chip.gen:hover,.lorabox .lb-thumb-chip.rep:hover{background:var(--p-button-primary-background,#3b82f6);}
+.lorabox .lb-thumb-chip.busy{pointer-events:none; animation:lb-pulse 1s ease infinite;}
+
+/* row line 1: grip · switch · name · actions */
+.lorabox .lb-l1{display:flex; align-items:center; gap:8px; min-width:0; height:28px;}
+.lorabox .lb-ico svg{display:block;}
+.lorabox .lb-name{display:flex; align-items:center; gap:6px; flex:1 1 auto; min-width:0; height:28px;
+  padding:0 10px; cursor:pointer; user-select:none; border-radius:7px;
+  background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
+  border:1px solid transparent; transition:border-color .12s, background .12s;}
+.lorabox .lb-name:hover{background:var(--comfy-menu-bg,#2e2e2e); border-color:var(--border-color,#4a4a4a);}
 .lorabox .lb-name.open{border-color:var(--p-button-primary-background,#6a8fe0);}
 .lorabox .lb-name .txt{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px;}
 .lorabox .lb-name .txt.none{color:var(--descrip-text,#888);}
-.lorabox .lb-name .car{flex:0 0 auto; color:var(--descrip-text,#888); font-size:10px;}
-.lorabox .lb-slider{width:100%; min-width:0; height:18px; cursor:pointer;
-  accent-color:var(--p-button-primary-background,#3b82f6);}
-.lorabox .lb-num{width:100%; min-width:0; height:26px; padding:0 6px; text-align:center;
-  background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#4a4a4a); border-radius:6px; font-size:11px;
+.lorabox .lb-name .car{flex:0 0 auto; color:var(--descrip-text,#888); font-size:9px;}
+.lorabox .lb-ico{width:24px; height:24px; flex:0 0 auto; padding:0; cursor:pointer; display:flex;
+  align-items:center; justify-content:center; background:transparent; color:var(--descrip-text,#888);
+  border:none; border-radius:7px; font-size:13px; line-height:1; transition:background .12s, color .12s;}
+.lorabox .lb-ico:hover{background:var(--comfy-menu-bg,#3a3a3a); color:var(--input-text,#fff);}
+.lorabox .lb-ico.on{color:var(--p-button-primary-background,#7aa2f0);}
+.lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
+
+/* row line 2: slider · number (+ clip) */
+.lorabox .lb-l2{display:flex; align-items:center; gap:10px; min-width:0; height:24px;}
+.lorabox .lb-slider{-webkit-appearance:none; appearance:none; flex:1 1 auto; min-width:36px; height:4px;
+  border-radius:3px; background:var(--border-color,#4a4a4a); outline:none; cursor:pointer;}
+.lorabox .lb-slider::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+  background:var(--p-button-primary-background,#3b82f6); border:2px solid var(--comfy-input-bg,#1e1e1e); cursor:pointer;}
+.lorabox .lb-slider::-moz-range-thumb{width:14px; height:14px; border-radius:50%;
+  background:var(--p-button-primary-background,#3b82f6); border:2px solid var(--comfy-input-bg,#1e1e1e); cursor:pointer;}
+.lorabox .lb-num{flex:0 0 52px; width:52px; height:24px; padding:0 6px; text-align:center;
+  background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
+  border:1px solid var(--border-color,#3a3a3a); border-radius:7px; font-size:11px;
   -moz-appearance:textfield; appearance:textfield;}
 .lorabox .lb-num::-webkit-outer-spin-button,
 .lorabox .lb-num::-webkit-inner-spin-button{-webkit-appearance:none; margin:0;}
@@ -245,42 +362,41 @@ function injectStyle() {
 /* at-a-glance read of the weight: warm for negative ("anti-LoRA"), dim for 0 */
 .lorabox .lb-num.neg{color:#e8855a; border-color:#7a4a36;}
 .lorabox .lb-num.zero{color:var(--descrip-text,#888);}
-.lorabox .lb-tag{font-size:9px; color:var(--descrip-text,#888); text-align:center; justify-self:center; overflow:hidden; white-space:nowrap;}
-.lorabox .lb-ico{width:26px; height:26px; padding:0; cursor:pointer; display:flex;
-  align-items:center; justify-content:center; background:transparent;
-  color:var(--descrip-text,#9a9a9a); border:none; border-radius:6px; font-size:14px; line-height:1; flex:0 0 auto;}
-.lorabox .lb-ico:hover{background:var(--comfy-menu-bg,#3a3a3a); color:var(--input-text,#fff);}
-.lorabox .lb-ico.on{color:var(--p-button-primary-background,#7aa2f0);}
-.lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
+.lorabox .lb-clip{flex:0 0 auto; font-size:9px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--descrip-text,#888); user-select:none;}
+
+/* trigger editor */
 .lorabox .lb-trig{display:flex; align-items:flex-start; gap:6px; min-width:0;}
 .lorabox .lb-trig-in{flex:1 1 auto; min-width:0; min-height:${TRIG_MIN}px; padding:5px 8px;
   background:var(--comfy-menu-bg,#202a2e); color:var(--input-text,#dfeef0); resize:none; overflow:hidden;
-  border:1px solid var(--border-color,#3a4a52); border-radius:6px; font-size:11px; line-height:1.4;
+  border:1px solid var(--border-color,#3a4a52); border-radius:7px; font-size:11px; line-height:1.4;
   outline:none; font-family:inherit;}
 .lorabox .lb-trig-in:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
 .lorabox .lb-trig-in::placeholder{color:var(--descrip-text,#778);}
-.lorabox .lb-add{height:30px; width:100%; margin-top:4px; display:flex; align-items:center;
+
+/* add button */
+.lorabox .lb-add{height:${ADD_H - 4}px; width:100%; margin-top:2px; display:flex; align-items:center;
   justify-content:center; gap:7px;
-  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 26%, transparent);
+  background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 22%, transparent);
   color:var(--input-text,#eaf2ff);
-  border:1px solid color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 55%, transparent);
-  border-radius:9px; cursor:pointer; font-size:12px; font-weight:600; letter-spacing:.03em;
-  backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+  border:1px solid color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 50%, transparent);
+  border-radius:10px; cursor:pointer; font-size:12px; font-weight:600; letter-spacing:.02em;
   transition:background .14s, border-color .14s, transform .06s;}
-.lorabox .lb-add:hover{background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 42%, transparent);
+.lorabox .lb-add:hover{background:color-mix(in srgb, var(--p-button-primary-background,#3b82f6) 38%, transparent);
   border-color:var(--p-button-primary-background,#3b82f6);}
 .lorabox .lb-add:active{transform:translateY(1px);}
 .lorabox .lb-add .plus{font-size:15px; font-weight:700; line-height:1; opacity:.9;}
-.lorabox .lb-empty{display:flex; align-items:center; justify-content:center; min-height:40px;
-  color:var(--descrip-text,#888); font-style:italic; font-size:11px; opacity:.8;}
+.lorabox .lb-empty{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  min-height:${EMPTY_H}px; color:var(--descrip-text,#888); font-size:11px; text-align:center; opacity:.85;}
+.lorabox .lb-empty .lb-empty-t{font-size:10px; opacity:.75;}
 
+/* searchable lora picker (floating) */
 .lb-pop{position:fixed; z-index:10010; display:flex; flex-direction:column; gap:6px;
-  padding:6px; max-height:min(380px, calc(100vh - 24px)); overflow:hidden;
-  border-radius:8px;
+  padding:6px; max-height:min(380px, calc(100vh - 24px)); overflow:hidden; border-radius:9px;
   background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
-  box-shadow:0 10px 30px rgba(0,0,0,.55); font-family:sans-serif; font-size:12px;
+  box-shadow:0 12px 34px rgba(0,0,0,.55); font-family:sans-serif; font-size:12px;
   line-height:1.4; box-sizing:border-box;}
-.lb-pop-search{flex:0 0 auto; height:28px; padding:0 9px; font-size:12px; border-radius:6px; outline:none;
+.lb-pop-search{flex:0 0 auto; height:30px; padding:0 10px; font-size:12px; border-radius:7px; outline:none;
   background:var(--comfy-input-bg,#1a1a1a); color:var(--input-text,#eee);
   border:1px solid var(--border-color,#555); box-sizing:border-box;}
 .lb-pop-search:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
@@ -290,7 +406,7 @@ function injectStyle() {
   font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
   color:var(--descrip-text,#888); background:var(--comfy-menu-bg,#222);
   border-bottom:1px solid var(--border-color,#444); pointer-events:none; line-height:1.2;}
-.lb-pop-item{display:block; width:100%; margin:0 0 2px; padding:6px 9px; border-radius:5px;
+.lb-pop-item{display:block; width:100%; margin:0 0 2px; padding:6px 9px; border-radius:6px;
   cursor:pointer; font-size:12px; line-height:1.35; min-height:27px; box-sizing:border-box;
   color:var(--input-text,#ddd); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   background:transparent; border:none; text-align:left; font-family:inherit;}
@@ -301,12 +417,82 @@ function injectStyle() {
   background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
   box-shadow:0 12px 36px rgba(0,0,0,.6);}
 .lb-thumb-pop img{display:block; max-width:280px; max-height:280px; border-radius:6px;}
+
+/* generate-preview type menu (Character / Style) */
+.lb-menu{position:fixed; z-index:10015; display:flex; flex-direction:column; gap:2px; padding:5px;
+  min-width:200px; border-radius:9px; background:var(--comfy-menu-bg,#222);
+  border:1px solid var(--border-color,#555); box-shadow:0 12px 34px rgba(0,0,0,.55); font-family:sans-serif;}
+.lb-menu-head{font-size:9px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--descrip-text,#888); padding:3px 9px 4px;}
+.lb-menu-item{display:flex; flex-direction:column; gap:1px; align-items:flex-start; padding:7px 9px;
+  border:none; border-radius:6px; background:transparent; color:var(--input-text,#ddd);
+  cursor:pointer; text-align:left; font-family:inherit;}
+.lb-menu-item:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
+.lb-menu-item .t{font-size:12px; font-weight:600;}
+.lb-menu-item .d{font-size:10px; opacity:.8;}
+
+/* undo toast */
+.lb-toast{position:fixed; left:50%; bottom:26px; transform:translate(-50%,12px); opacity:0; z-index:10030;
+  display:flex; align-items:center; gap:14px; padding:10px 15px; border-radius:10px;
+  background:var(--comfy-menu-bg,#232323); color:var(--input-text,#eee);
+  border:1px solid var(--border-color,#555); box-shadow:0 12px 36px rgba(0,0,0,.5);
+  font-size:12px; transition:opacity .18s, transform .18s;}
+.lb-toast.show{opacity:1; transform:translate(-50%,0);}
+.lb-toast-act{background:transparent; border:none; cursor:pointer; font-size:12px; font-weight:700;
+  color:var(--p-button-primary-background,#7aa2f0);}
+.lb-toast-act:hover{text-decoration:underline;}
 `;
     document.head.appendChild(s);
 }
 
 const round2 = (v) => (Math.round(v * 100) / 100).toString();
 const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.toggle("zero", v === 0); };
+
+// a tag glyph for the trigger-words toggle (clearer than the old ⓘ)
+const TAG_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/></svg>';
+// explains how a LoRA weight can be negative (the "minus" people don't expect)
+const STRENGTH_TIP = "Strength: 1.0 = normal, 0 = off, below 0 = anti-LoRA (pushes the image away from this concept), up to 3 = stronger than trained.";
+
+/* ---- generate-preview type menu (Character / Style …) ------------------- */
+const GEN_KINDS = [
+    ["character", "Character / portrait", "renders a person — best for character & face LoRAs"],
+    ["style", "Style / scene", "renders an everyday scene — best for style LoRAs"],
+];
+let GEN_MENU = null;
+function onGenDocDown(e) { if (GEN_MENU && !GEN_MENU.contains(e.target)) closeGenMenu(); }
+function closeGenMenu() {
+    if (!GEN_MENU) return;
+    document.removeEventListener("mousedown", onGenDocDown, true);
+    GEN_MENU.remove(); GEN_MENU = null;
+}
+function openGenMenu(anchor, cb) {
+    closeGenMenu();
+    const m = document.createElement("div");
+    m.className = "lb-menu";
+    const head = document.createElement("div");
+    head.className = "lb-menu-head"; head.textContent = "Generate preview as…";
+    m.appendChild(head);
+    GEN_KINDS.forEach(([k, label, desc]) => {
+        const it = document.createElement("button");
+        it.className = "lb-menu-item";
+        const t = document.createElement("span"); t.className = "t"; t.textContent = label;
+        const d = document.createElement("span"); d.className = "d"; d.textContent = desc;
+        it.append(t, d);
+        it.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); closeGenMenu(); cb(k); };
+        m.appendChild(it);
+    });
+    stop(m);
+    document.body.appendChild(m);
+    const r = anchor.getBoundingClientRect();
+    const mw = m.offsetWidth, mh = m.offsetHeight;
+    let left = Math.min(r.left, window.innerWidth - mw - 8);
+    let top = r.bottom + 4;
+    if (top + mh > window.innerHeight - 8) top = r.top - mh - 4;
+    m.style.left = Math.max(8, left) + "px";
+    m.style.top = Math.max(8, top) + "px";
+    GEN_MENU = m;
+    setTimeout(() => document.addEventListener("mousedown", onGenDocDown, true), 0);
+}
 
 /* Force the panel's root element to span the node's content width. The
  * frontend positions/sizes DOM widgets reactively off the widget's HEIGHT, so
@@ -326,14 +512,11 @@ const rowOff = (node, row) => node._lbMute || !row.on;
 
 /* Stop touch gestures that start inside any Lora Box panel from reaching
  * litegraph, which would pinch-zoom / pan the whole graph when you press or
- * drag a slider on a touchscreen / precision touchpad (the long-standing
- * "press slider → everything gets bigger" bug). litegraph binds its touch
- * listeners in the CAPTURE phase on an ANCESTOR of the DOM-widget layer
- * (canvasEl.parentElement), so a bubble-phase stop on our own element is too
- * late. A capture-phase listener on `document` runs first and stops the event
- * before litegraph sees it; we only stopPropagation (never preventDefault), so
- * the browser still performs the control's native touch action (slider drag,
- * list scroll). Installed once, globally. */
+ * drag a slider on a touchscreen / precision touchpad. litegraph binds its
+ * touch listeners in the CAPTURE phase on an ANCESTOR of the DOM-widget layer,
+ * so a bubble-phase stop on our own element is too late. A capture-phase
+ * listener on `document` runs first; we only stopPropagation (never
+ * preventDefault), so the control's native touch action still works. Once. */
 let LB_TOUCH_GUARD = false;
 function installTouchGuard() {
     if (LB_TOUCH_GUARD) return;
@@ -507,8 +690,9 @@ app.registerExtension({
             node._lbRows = [];
             node._lbSep = false;
             node._lbMute = false;
-            node._lbPos = "end";
+            node._lbPos = "beginning";
             node._lbDelim = ", ";
+            node._lbOptsOpen = false;
             node._lbContentH = 150;
 
             const root = document.createElement("div");
@@ -523,38 +707,77 @@ app.registerExtension({
             // NOT touch pointermove — stopping that froze DOM repositioning.
             stop(inner); eatWheel(inner);
 
+            // ---- header: title · live count · ⚙ options ----
             const head = document.createElement("div");
             head.className = "lb-head";
-            node._lbMuteCb = mkCheck(head, "mute all", (v) => { node._lbMute = v; applyMute(node); serialize(node); });
-            node._lbSepCb = mkCheck(head, "model + clip", (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
+            const title = document.createElement("span");
+            title.className = "lb-title";
+            title.textContent = "Lora Box";
+            const count = document.createElement("span");
+            count.className = "lb-count";
+            node._lbCount = count;
+            const gear = document.createElement("button");
+            gear.className = "lb-gear"; gear.textContent = "⚙"; gear.title = "options";
+            head.append(title, count, gear);
             inner.appendChild(head);
 
-            // Second header line: where to inject the LoRA trigger words into a
-            // connected prompt, and the separator used. Stored in `data` (pos /
-            // delim) so it round-trips with the workflow like everything else.
-            const head2 = document.createElement("div");
-            head2.className = "lb-head2";
-            head2.title = "How LoRA trigger words merge into a connected prompt";
-            const h2lbl = document.createElement("span");
-            h2lbl.className = "lb-h2lbl"; h2lbl.textContent = "triggers:";
+            // ---- options disclosure (mute / model+clip / trigger merge) ----
+            const opts = document.createElement("div");
+            opts.className = "lb-opts";
+            opts.style.display = "none";
+            node._lbOpts = opts;
+
+            const row1 = document.createElement("div");
+            row1.className = "lb-opts-row";
+            const muteRow = mkSwitchRow(false, "mute all",
+                "Skip every LoRA and pass the prompt through untouched (state is preserved)",
+                (v) => { node._lbMute = v; applyMute(node); updateActiveCount(node); serialize(node); });
+            node._lbMuteCb = muteRow._cb;
+            const sepRow = mkSwitchRow(false, "model + clip",
+                "Separate model and clip strengths per LoRA",
+                (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
+            node._lbSepCb = sepRow._cb;
+            row1.append(muteRow, sepRow);
+
+            const row2 = document.createElement("div");
+            row2.className = "lb-opts-row";
+            row2.title = "Where LoRA trigger words merge into a connected prompt";
+            const tlbl = document.createElement("span");
+            tlbl.className = "lb-lbl"; tlbl.textContent = "triggers";
             const sel = document.createElement("select");
             [["end", "at end of prompt"], ["beginning", "at start of prompt"]].forEach(([v, t]) => {
                 const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
             });
-            sel.value = node._lbPos || "end";
+            sel.value = node._lbPos || "beginning";
             sel.onchange = () => { node._lbPos = sel.value; serialize(node); };
             stop(sel); eatWheel(sel);
             node._lbPosSel = sel;
             const dlbl = document.createElement("span");
-            dlbl.className = "lb-h2lbl"; dlbl.textContent = "sep";
+            dlbl.className = "lb-lbl"; dlbl.textContent = "sep";
             const delim = document.createElement("input");
             delim.className = "lb-delim"; delim.value = node._lbDelim != null ? node._lbDelim : ", ";
             delim.title = "delimiter between prompt and trigger words";
             delim.onchange = () => { node._lbDelim = delim.value; serialize(node); };
             stop(delim); eatWheel(delim);
             node._lbDelimIn = delim;
-            head2.append(h2lbl, sel, dlbl, delim);
-            inner.appendChild(head2);
+            row2.append(tlbl, sel, dlbl, delim);
+
+            const hint = document.createElement("div");
+            hint.className = "lb-hint";
+            hint.innerHTML = "Trigger words are the keywords a LoRA was trained on. If you wire a " +
+                "prompt in, they're added at the <b>start</b> (stronger emphasis) or the " +
+                "<b>end</b> (a softer modifier). “sep” is what goes between them.";
+            opts.append(row1, row2, hint);
+            inner.appendChild(opts);
+
+            gear.onclick = (e) => {
+                e.stopPropagation();
+                node._lbOptsOpen = !node._lbOptsOpen;
+                opts.style.display = node._lbOptsOpen ? "" : "none";
+                gear.classList.toggle("on", node._lbOptsOpen);
+                sizeNode(node);
+            };
+            stop(gear);
 
             const list = document.createElement("div");
             list.className = "lb-list";
@@ -563,7 +786,7 @@ app.registerExtension({
 
             const add = document.createElement("button");
             add.className = "lb-add";
-            add.innerHTML = '<span class="plus">+</span><span>Add Lora</span>';
+            add.innerHTML = '<span class="plus">+</span><span>Add LoRA</span>';
             add.onclick = (e) => {
                 e.stopPropagation();
                 node._lbRows.push({ on: true, name: "None", sm: 1.0, sc: 1.0 });
@@ -572,13 +795,11 @@ app.registerExtension({
             stop(add);
             inner.appendChild(add);
 
-            // Use the SAME mechanism core resizable DOM widgets (Note / markdown
-            // / multiline string) use: do NOT override computeLayoutSize. Instead
-            // feed our deterministic content height through the supported
-            // getMinHeight/getMaxHeight options. The default DOMWidgetImpl then
-            // (a) leaves node WIDTH unconstrained → the node resizes freely both
-            // ways and the panel fills the width, and (b) never collapses the
-            // node when a value changes.
+            // Use the SAME mechanism core resizable DOM widgets use: feed our
+            // deterministic content height through getMinHeight/getMaxHeight.
+            // The default DOMWidgetImpl then leaves WIDTH unconstrained (node
+            // resizes freely, panel fills width) and never collapses on a value
+            // change.
             const hgt = () => (typeof node._lbContentH === "number" && node._lbContentH > 0) ? node._lbContentH : 150;
             const widget = node.addDOMWidget("lorabox_ui", "div", root, {
                 serialize: false, hideOnZoom: false,
@@ -586,8 +807,6 @@ app.registerExtension({
             });
             node._lbWidget = widget;
 
-            // Pleasant default width for a freshly-created node. Loaded nodes get
-            // their saved width restored by onConfigure afterwards.
             if (!node.size || node.size[0] < MIN_W) node.setSize([FIXED_W, (node.size && node.size[1]) || 200]);
 
             getLoraList();
@@ -600,10 +819,9 @@ app.registerExtension({
             scheduleInit(this);
         };
 
-        // The node is freely resizable both ways (like the core Note node). We
-        // only stop it from getting so narrow the cards get crushed; otherwise
-        // we never touch the width, so neither resizing nor value changes can
-        // make it "slip" or collapse.
+        // Freely resizable both ways (like the core Note node). Only stop it from
+        // getting so narrow the cards get crushed; never touch the width
+        // otherwise, so neither resize nor value changes can make it slip.
         const onResize = nodeType.prototype.onResize;
         nodeType.prototype.onResize = function (size) {
             if (size && size[0] < MIN_W) size[0] = MIN_W;
@@ -611,9 +829,6 @@ app.registerExtension({
             fitRootWidth(this);
         };
 
-        // The DOM panel's element width is not re-stretched by the framework on
-        // a width change, so we keep it matched to the node every drawn frame
-        // (cheap; only assigns when the value actually changes).
         const onDrawForeground = nodeType.prototype.onDrawForeground;
         nodeType.prototype.onDrawForeground = function () {
             onDrawForeground && onDrawForeground.apply(this, arguments);
@@ -621,29 +836,55 @@ app.registerExtension({
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
-        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); onRemoved && onRemoved.apply(this, arguments); };
+        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); closeGenMenu(); closeToast(); onRemoved && onRemoved.apply(this, arguments); };
     },
 });
 
 /* Defer init to a macrotask so widget values restored during deserialize
  * (onConfigure runs after ComfyUI sets the saved `data` value) are in place.
- * Deduped per node so create+configure can't run it twice or race — replaces
- * the old fixed 30ms timeout. */
+ * Deduped per node so create+configure can't run it twice or race. */
 function scheduleInit(node) {
     if (node._lbInitT) clearTimeout(node._lbInitT);
     node._lbInitT = setTimeout(() => { node._lbInitT = 0; initFromData(node); }, 0);
 }
 
-function mkCheck(parent, label, onChange) {
+/* a styled on/off switch (label > input + track + knob) */
+function mkSwitch(checked, title, onChange) {
     const l = document.createElement("label");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
+    l.className = "lb-switch"; l.title = title || "";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!checked;
+    const track = document.createElement("span"); track.className = "track";
+    const knob = document.createElement("span"); knob.className = "knob";
     cb.onchange = () => onChange(cb.checked);
-    stop(cb);
-    l.appendChild(cb);
-    l.appendChild(document.createTextNode(label));
-    parent.appendChild(l);
-    return cb;
+    l.append(cb, track, knob);
+    stop(l);
+    l._cb = cb;
+    return l;
+}
+
+/* a switch plus a clickable text label, for the options panel */
+function mkSwitchRow(checked, label, title, onChange) {
+    const wrap = document.createElement("div");
+    wrap.className = "lb-swrow"; wrap.title = title || "";
+    const sw = mkSwitch(checked, title, onChange);
+    const txt = document.createElement("span");
+    txt.textContent = label;
+    txt.onclick = () => { sw._cb.checked = !sw._cb.checked; sw._cb.onchange(); };
+    wrap.append(sw, txt);
+    wrap._cb = sw._cb;
+    return wrap;
+}
+
+function updateActiveCount(node) {
+    if (!node._lbCount) return;
+    if (node._lbMute) {
+        node._lbCount.textContent = "muted";
+        node._lbCount.classList.add("muted");
+        return;
+    }
+    node._lbCount.classList.remove("muted");
+    const n = node._lbRows.filter((r) => r.on && r.name && r.name !== "None").length;
+    node._lbCount.textContent = n + " active";
 }
 
 function applyMute(node) {
@@ -662,10 +903,9 @@ function markDuplicates(node) {
 }
 
 /* ---- drag-to-reorder (native HTML5 DnD) ---------------------------------
- * Uses the browser's drag-and-drop, not pointermove, so it doesn't violate
- * §6: we never intercept pointermove (which froze DOM repositioning) and the
- * node itself can't be dragged because pointerdown is already stopped at the
- * container. Only the small grip handle starts a drag. */
+ * Uses the browser's drag-and-drop, not pointermove, so the node itself can't
+ * be dragged (pointerdown is already stopped at the container). Only the grip
+ * handle starts a reorder drag. */
 let LB_DRAG_FROM = null;
 function clearDropMarks(node) {
     if (!node._lbList) return;
@@ -693,7 +933,7 @@ function attachReorder(node, card, handle, index) {
     });
     card.addEventListener("dragleave", () => card.classList.remove("lb-drop-before", "lb-drop-after"));
     card.addEventListener("drop", (e) => {
-        if (LB_DRAG_FROM === null) return;
+        if (LB_DRAG_FROM === null) return;   // external file drop (image) — not us
         e.preventDefault();
         const rect = card.getBoundingClientRect();
         const after = e.clientY > rect.top + rect.height / 2;
@@ -714,15 +954,13 @@ function moveRow(node, from, to) {
 
 /* Single source of truth: read the saved `data` widget, default only if truly
  * empty. Used by both onNodeCreated and onConfigure so neither can clobber the
- * other (the old code rendered empty + serialized "[]" during a load race). */
+ * other. */
 function initFromData(node) {
     const dataW = node._lbDataW || (node.widgets || []).find((w) => w.name === "data");
     node._lbDataW = dataW;
-    // Accept both the legacy bare-list shape and the current
-    // {v, mute, rows} object (see serialize / the Python apply()).
     let parsed = [];
     try { parsed = JSON.parse(dataW?.value || "[]"); } catch (e) { parsed = []; }
-    let rows = parsed, mute = false, pos = "end", delim = ", ";
+    let rows = parsed, mute = false, pos = "beginning", delim = ", ";
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
         mute = !!parsed.mute;
         if (typeof parsed.pos === "string") pos = parsed.pos;
@@ -744,9 +982,8 @@ function initFromData(node) {
     node._lbPos = pos;
     node._lbDelim = delim;
     if (node._lbSepCb) node._lbSepCb.checked = node._lbSep;
-    // Restore the saved "mute all" state so a workflow saved while muted reopens
-    // muted *and* shows the checkbox ticked (was always reset to false, which
-    // left LoRAs silently un-applied with an empty checkbox — nothing to undo).
+    // Restore the saved "mute all" state so a muted-saved workflow reopens muted
+    // AND shows the toggle on (was reset to false → LoRAs silently un-applied).
     if (node._lbMuteCb) node._lbMuteCb.checked = node._lbMute;
     if (node._lbPosSel) node._lbPosSel.value = node._lbPos;
     if (node._lbDelimIn) node._lbDelimIn.value = node._lbDelim;
@@ -755,9 +992,6 @@ function initFromData(node) {
 
 function serialize(node) {
     if (!node._lbDataW) return;
-    // Persist each row's REAL on/off state plus a separate `mute` flag, so
-    // muting-all and then saving the workflow no longer wipes per-row states
-    // (the backend skips everything when mute is true).
     const rows = node._lbRows.map((r) => {
         const o = { on: !!r.on, name: r.name, sm: r.sm, sc: node._lbSep ? r.sc : r.sm };
         if (typeof r.trig === "string") o.trig = r.trig;
@@ -789,8 +1023,9 @@ function renderRows(node) {
     if (node._lbRows.length === 0) {
         const e = document.createElement("div");
         e.className = "lb-empty";
-        e.textContent = "no loras yet — press “+ Add Lora”";
+        e.innerHTML = '<span>No LoRAs yet</span><span class="lb-empty-t">press “+ Add LoRA” below</span>';
         list.appendChild(e);
+        updateActiveCount(node);
         return;
     }
 
@@ -798,58 +1033,67 @@ function renderRows(node) {
         const card = document.createElement("div");
         card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "");
 
+        // the coloured left bar doubles as the drag handle
+        const stripe = document.createElement("div");
+        stripe.className = "lb-stripe"; stripe.title = "drag to reorder";
+        attachReorder(node, card, stripe, i);
+
         const l1 = document.createElement("div");
         l1.className = "lb-l1";
 
-        const handle = document.createElement("div");
-        handle.className = "lb-drag"; handle.textContent = "⠿"; handle.title = "drag to reorder";
-        attachReorder(node, card, handle, i);
-
-        const en = document.createElement("input");
-        en.type = "checkbox"; en.className = "lb-en"; en.checked = !!row.on; en.title = "enable / disable";
-        en.onchange = () => { row.on = en.checked; card.classList.toggle("lb-off", rowOff(node, row)); serialize(node); };
-        stop(en);
+        const sw = mkSwitch(row.on, "enable / disable this LoRA", (v) => {
+            row.on = v; card.classList.toggle("lb-off", rowOff(node, row));
+            updateActiveCount(node); serialize(node);
+        });
 
         const field = document.createElement("div");
         field.className = "lb-name"; field.title = row.name || "None"; field.tabIndex = 0;
         const txt = document.createElement("span");
         txt.className = "txt" + (!row.name || row.name === "None" ? " none" : "");
-        txt.textContent = row.name && row.name !== "None" ? row.name : "None";
+        txt.textContent = row.name && row.name !== "None" ? row.name : "Choose a LoRA…";
         const car = document.createElement("span"); car.className = "car"; car.textContent = "▼";
         field.append(txt, car);
-        field.onclick = (e) => {
-            e.stopPropagation();
-            openPicker(node, row, field);
-        };
+        field.onclick = (e) => { e.stopPropagation(); openPicker(node, row, field); };
         stop(field);
 
         const trig = document.createElement("button");
-        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.textContent = "ⓘ"; trig.title = "trigger words";
+        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.innerHTML = TAG_SVG;
+        trig.title = "trigger words — the keywords this LoRA responds to";
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
         stop(trig);
 
         const del = document.createElement("button");
-        del.className = "lb-ico lb-del"; del.textContent = "✕"; del.title = "remove lora";
-        del.onclick = (e) => { e.stopPropagation(); node._lbRows.splice(i, 1); renderRows(node); sizeNode(node); serialize(node); };
+        del.className = "lb-ico lb-del"; del.textContent = "✕"; del.title = "remove this LoRA";
+        del.onclick = (e) => {
+            e.stopPropagation();
+            const removed = node._lbRows[i], at = i;
+            node._lbRows.splice(i, 1);
+            renderRows(node); sizeNode(node); serialize(node);
+            showToast("LoRA removed", "Undo", () => {
+                node._lbRows.splice(Math.min(at, node._lbRows.length), 0, removed);
+                renderRows(node); sizeNode(node); serialize(node);
+            });
+        };
         stop(del);
 
-        l1.append(handle, en, field, trig, del);
+        l1.append(sw, field, trig, del);
 
         const l2 = document.createElement("div");
-        l2.className = "lb-l2" + (node._lbSep ? " sep" : "");
+        l2.className = "lb-l2";
 
         const slider = document.createElement("input");
         slider.className = "lb-slider"; slider.type = "range";
-        slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm); slider.title = "strength";
-        const num = mkNum(row.sm, node._lbSep ? "model strength" : "strength",
+        slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm);
+        slider.title = STRENGTH_TIP;
+        const num = mkNum(row.sm, (node._lbSep ? "Model strength. " : "") + STRENGTH_TIP,
             (v) => { row.sm = v; slider.value = String(v); serialize(node); });
         slider.oninput = () => { row.sm = clampS(parseFloat(slider.value)); num.value = round2(row.sm); tintNum(num, row.sm); serialize(node); };
         stop(slider); eatWheel(slider);
 
         l2.append(slider, num);
         if (node._lbSep) {
-            const tag = document.createElement("span"); tag.className = "lb-tag"; tag.textContent = "clip";
-            const cnum = mkNum(row.sc != null ? row.sc : row.sm, "clip strength", (v) => { row.sc = v; serialize(node); });
+            const tag = document.createElement("span"); tag.className = "lb-clip"; tag.textContent = "clip";
+            const cnum = mkNum(row.sc != null ? row.sc : row.sm, "CLIP strength. " + STRENGTH_TIP, (v) => { row.sc = v; serialize(node); });
             l2.append(tag, cnum);
         }
 
@@ -861,28 +1105,48 @@ function renderRows(node) {
         main.className = "lb-main";
         main.append(buildThumb(node, row), content);
 
-        card.append(main);
+        card.append(stripe, main);
         if (row._open) card.append(buildTrigEditor(node, row));
 
         list.appendChild(card);
     });
 
     markDuplicates(node);
+    updateActiveCount(node);
 }
 
-/* per-row thumbnail: shows the lora's sidecar image (shared across workflows),
- * click to set/change, hover to enlarge, ✕ to remove. */
+/* per-row thumbnail: the lora's reference picture (shared across workflows).
+ * Auto-loads the lora's own preview when one exists. When empty, two labelled
+ * buttons make it obvious: ✨ Generate (a quick Z-Image render) or ＋ Add (your
+ * own image, click or drag&drop). With an image, hover shows corner chips to
+ * regenerate / replace / remove, and hovering enlarges it. */
 function buildThumb(node, row) {
     const thumb = document.createElement("div");
     thumb.className = "lb-thumb";
-    thumb.title = "click to set a picture for this lora";
     const img = document.createElement("img");
-    const ph = document.createElement("div");
-    ph.className = "lb-ph";
-    ph.innerHTML = '<span>🖼</span><span class="lb-ph-t">add</span>';
-    const x = document.createElement("div");
-    x.className = "lb-thumb-x"; x.textContent = "✕"; x.title = "remove picture";
-    thumb.append(img, ph, x);
+
+    // empty-state buttons (visible when there is no image)
+    const acts = document.createElement("div");
+    acts.className = "lb-thumb-acts";
+    const genBtn = document.createElement("div");
+    genBtn.className = "lb-thumb-btn";
+    genBtn.innerHTML = '<span class="i">✨</span><span>gen</span>';
+    genBtn.title = "Generate a preview now — a quick Z-Image test render of this LoRA";
+    const addBtn = document.createElement("div");
+    addBtn.className = "lb-thumb-btn";
+    addBtn.innerHTML = '<span class="i">＋</span><span>add</span>';
+    addBtn.title = "Use your own image — click to pick, or drag & drop one here";
+    acts.append(genBtn, addBtn);
+
+    // image-state corner chips (shown on hover)
+    const chipGen = document.createElement("div");
+    chipGen.className = "lb-thumb-chip gen"; chipGen.textContent = "✨"; chipGen.title = "Regenerate preview";
+    const chipRep = document.createElement("div");
+    chipRep.className = "lb-thumb-chip rep"; chipRep.textContent = "＋"; chipRep.title = "Replace with your own image";
+    const chipX = document.createElement("div");
+    chipX.className = "lb-thumb-chip x"; chipX.textContent = "✕"; chipX.title = "Remove picture";
+
+    thumb.append(img, acts, chipGen, chipRep, chipX);
 
     const setURL = (url) => {
         // URLs are owned by PREVIEW_CACHE (shared across renders) — do NOT revoke
@@ -893,7 +1157,7 @@ function buildThumb(node, row) {
     };
     const refresh = () => {
         if (!row.name || row.name === "None") { setURL(null); return; }
-        // synchronous when cached → the image is there on the first frame, so a
+        // synchronous when cached → image is there on the first frame, so a
         // re-render (e.g. drag-reorder) never flashes empty.
         if (PREVIEW_CACHE.has(row.name)) { setURL(PREVIEW_CACHE.get(row.name)); return; }
         loadPreviewURL(row.name).then((u) => {
@@ -903,21 +1167,37 @@ function buildThumb(node, row) {
     thumb._lbRefresh = refresh;
     refresh();
 
-    thumb.onclick = (e) => {
-        e.stopPropagation();
-        if (!row.name || row.name === "None") { return; }   // pick a lora first
+    const needLora = () => {
+        if (!row.name || row.name === "None") { showToast("Pick a LoRA first", null, null, 2200); return true; }
+        return false;
+    };
+    const applyFile = async (f) => {
+        if (!f || !f.type || !f.type.startsWith("image/")) return;
+        if (f.size > 8 * 1024 * 1024) { alert("Image too large (max 8 MB)."); return; }
+        const ok = await uploadPreview(row.name, f);
+        if (ok) { evictPreview(row.name); refresh(); }
+    };
+    const pickFile = () => {
         const inp = document.createElement("input");
         inp.type = "file"; inp.accept = "image/*";
-        inp.onchange = async () => {
-            const f = inp.files && inp.files[0];
-            if (!f) return;
-            if (f.size > 8 * 1024 * 1024) { alert("Image too large (max 8 MB)."); return; }
-            const ok = await uploadPreview(row.name, f);
-            if (ok) { evictPreview(row.name); refresh(); }
-        };
+        inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) applyFile(f); };
         inp.click();
     };
-    x.onclick = async (e) => {
+    const doGen = async (btn, busyHTML, kind) => {
+        if (btn.classList.contains("busy")) return;
+        const html = btn.innerHTML;
+        btn.classList.add("busy"); btn.innerHTML = busyHTML;
+        const res = await generatePreview(row.name, kind);
+        btn.classList.remove("busy"); btn.innerHTML = html;
+        if (res && res.ok) { evictPreview(row.name); refresh(); }
+        else alert("Preview generation failed: " + ((res && res.error) || "unknown error"));
+    };
+
+    genBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; openGenMenu(genBtn, (k) => doGen(genBtn, '<span class="i">⏳</span><span>…</span>', k)); };
+    addBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
+    chipGen.onclick = (e) => { e.stopPropagation(); if (needLora()) return; openGenMenu(chipGen, (k) => doGen(chipGen, "⏳", k)); };
+    chipRep.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
+    chipX.onclick = async (e) => {
         e.stopPropagation();
         if (!row.name || row.name === "None") return;
         closeThumbPop();
@@ -925,6 +1205,22 @@ function buildThumb(node, row) {
         evictPreview(row.name);
         refresh();
     };
+
+    // drag & drop an image straight onto the thumbnail
+    thumb.addEventListener("dragover", (e) => {
+        if (!row.name || row.name === "None") return;
+        e.preventDefault(); e.stopPropagation();
+        thumb.classList.add("drag-over");
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    });
+    thumb.addEventListener("dragleave", () => thumb.classList.remove("drag-over"));
+    thumb.addEventListener("drop", (e) => {
+        if (!row.name || row.name === "None") return;
+        e.preventDefault(); e.stopPropagation();
+        thumb.classList.remove("drag-over");
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) applyFile(f);
+    });
     thumb.onmouseenter = () => { if (thumb._url) openThumbPop(thumb, thumb._url); };
     thumb.onmouseleave = () => closeThumbPop();
     stop(thumb);
@@ -975,17 +1271,17 @@ function buildTrigEditor(node, row) {
     return wrap;
 }
 
-/* deterministic height; open trigger editors contribute their grown height */
+/* deterministic height; open trigger editors and the options panel contribute */
 function sizeNode(node) {
     const rows = node._lbRows;
     let listH;
-    if (rows.length === 0) listH = 40;
+    if (rows.length === 0) listH = EMPTY_H;
     else listH = rows.reduce((a, r) => a + CARD_BASE + (r._open ? TRIG_GAP + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
-    node._lbContentH = ROOT_PAD + INNER_GAP + HEAD_H + HEAD2_H + listH + ADD_H + BUFFER;
-    // Only the HEIGHT is ours to manage; width is whatever the user set. We
-    // preserve the current width and let computeSize derive the new height from
-    // our getMinHeight/getMaxHeight. This never changes width, so value changes
-    // (slider/checkbox) can't collapse the node, and the user can still resize.
+    const optsH = node._lbOptsOpen ? OPTS_H + GAP : 0;
+    node._lbContentH = PAD_V + HEAD_H + GAP + optsH + listH + GAP + ADD_H + BUFFER;
+    // Only HEIGHT is ours; width is whatever the user set. Preserve width and
+    // let computeSize derive height from getMinHeight/getMaxHeight — so value
+    // changes can't collapse the node and the user can still resize it.
     const curW = (node.size && node.size[0]) || FIXED_W;
     node.setSize([curW, node.computeSize()[1]]);
     fitRootWidth(node);

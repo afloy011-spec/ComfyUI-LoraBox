@@ -218,10 +218,15 @@ def _find_preview(name):
     base = _preview_base(name)
     if not base:
         return None
-    for ext in PREVIEW_EXTS:
-        p = base + ext
-        if os.path.exists(p):
-            return p
+    # A manually-set sidecar (<lora>.png) wins; otherwise fall back to the
+    # LoRA's own preview that Civitai / model managers drop next to the file
+    # (<lora>.preview.png). So a picture appears automatically when one exists,
+    # and a user upload (plain suffix, checked first) overrides it.
+    for suffix in ("", ".preview"):
+        for ext in PREVIEW_EXTS:
+            p = base + suffix + ext
+            if os.path.exists(p):
+                return p
     return None
 
 
@@ -301,6 +306,26 @@ try:
             except OSError:
                 pass
         return web.json_response({"ok": removed})
+
+    @PromptServer.instance.routes.post("/lorabox/preview/generate")
+    async def _lorabox_preview_generate(request):
+        """Render a quick Z-Image test image and save it as the lora sidecar."""
+        lora = request.query.get("file", "")
+        kind = request.query.get("kind", "character")
+        if not _preview_base(lora):
+            return web.json_response({"ok": False, "error": "unknown lora"}, status=400)
+        try:
+            try:
+                from .preview_generate import generate_lora_preview
+            except ImportError:
+                from preview_generate import generate_lora_preview
+            path = await generate_lora_preview(lora, kind)
+            return web.json_response({"ok": True, "path": os.path.basename(path)})
+        except TimeoutError as ex:
+            return web.json_response({"ok": False, "error": str(ex)}, status=504)
+        except Exception as ex:
+            log.exception("preview generate failed for %s", lora)
+            return web.json_response({"ok": False, "error": str(ex)}, status=500)
 except Exception as e:  # pragma: no cover - server may be unavailable at import
     log.warning("could not register /lorabox routes: %s", e)
 
@@ -385,10 +410,10 @@ class LoraBox:
         #     "rows": [...]}  (lets "mute all" survive a workflow save without
         #     wiping each row's real on/off state; pos/delim drive prompt merge)
         muted = False
-        pos, delim = "end", ", "
+        pos, delim = "beginning", ", "
         if isinstance(obj, dict):
             muted = bool(obj.get("mute"))
-            pos = obj.get("pos", "end") or "end"
+            pos = obj.get("pos", "beginning") or "beginning"
             delim = obj.get("delim", ", ")
             if delim is None:
                 delim = ", "
