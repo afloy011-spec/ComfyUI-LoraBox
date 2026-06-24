@@ -308,7 +308,7 @@ function injectStyle() {
   user-select:none; padding:0; background:transparent; border:none; color:#f0f0f0; transition:color .12s;}
 .lorabox .lb-name:hover .txt{color:#fff; text-decoration:underline; text-decoration-color:#555; text-underline-offset:2px;}
 .lorabox .lb-name.open .txt{color:#7aa2f0;}
-.lorabox .lb-name .txt{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+.lorabox .lb-name .txt{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   font-size:12px; font-weight:500;}
 .lorabox .lb-name .txt.none{color:#888; font-weight:400;}
 .lorabox .lb-ico{width:18px; height:18px; flex:0 0 auto; padding:0; cursor:pointer; display:flex;
@@ -319,7 +319,7 @@ function injectStyle() {
 .lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
 
 /* weight row(s): LABEL · slider(grows, blue fill) · value box */
-.lorabox .lb-wrow{display:grid; grid-template-columns:auto minmax(0,1fr) 36px; gap:8px;
+.lorabox .lb-wrow{display:grid; grid-template-columns:auto minmax(0,1fr) 46px; gap:8px;
   align-items:center; min-width:0; height:20px;}
 .lorabox .lb-card.lb-sep .lb-wlbl{min-width:58px;}
 .lorabox .lb-wlbl{font-size:9px; letter-spacing:.04em; text-transform:uppercase; color:#666; white-space:nowrap;}
@@ -437,7 +437,9 @@ function injectStyle() {
     document.head.appendChild(s);
 }
 
-const round2 = (v) => (Math.round(v * 100) / 100).toString();
+// Always show 2 decimals with a DOT ("1.00") — a plain text input, so a
+// non-English browser locale can't render it with a comma ("1,00").
+const fmtNum = (v) => (Math.round(v * 100) / 100).toFixed(2);
 const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.toggle("zero", v === 0); };
 
 // ── Feather-style line icons used across the panel (match the Figma mockup) ──
@@ -714,6 +716,11 @@ app.registerExtension({
             node._lbDelim = ", ";
             node._lbOptsOpen = false;
             node._lbContentH = 150;
+
+            // Match the Figma chrome: dark title bar + body (the default node
+            // colour is a teal that clashes with the panel's near-black cards).
+            node.color = "#1c1c1e";
+            node.bgcolor = "#141414";
 
             const root = document.createElement("div");
             root.className = "lorabox-root";
@@ -1027,10 +1034,15 @@ function serialize(node) {
 
 function mkNum(val, title, onChange) {
     const n = document.createElement("input");
-    n.className = "lb-num"; n.type = "number";
-    n.min = String(SMIN); n.max = String(SMAX); n.step = "0.05"; n.value = round2(val); n.title = title;
+    // text (not number) so the displayed value is the literal "1.00" — a
+    // type=number input localises the separator (shows "1,00" in ru/de/…).
+    n.className = "lb-num"; n.type = "text"; n.inputMode = "decimal";
+    n.value = fmtNum(val); n.title = title;
     tintNum(n, val);
-    n.onchange = () => { const v = clampS(parseFloat(n.value)); n.value = round2(v); tintNum(n, v); onChange(v); };
+    n.onchange = () => {
+        const v = clampS(parseFloat(String(n.value).replace(",", ".")));
+        n.value = fmtNum(v); tintNum(n, v); onChange(v);
+    };
     stop(n); eatWheel(n);
     return n;
 }
@@ -1111,7 +1123,7 @@ function renderRows(node) {
             });
             slider.oninput = () => {
                 const v = clampS(parseFloat(slider.value));
-                num.value = round2(v); tintNum(num, v); setSliderFill(slider, v); onChange(v);
+                num.value = fmtNum(v); tintNum(num, v); setSliderFill(slider, v); onChange(v);
             };
             stop(slider); eatWheel(slider);
             r.append(lbl, slider, num);
