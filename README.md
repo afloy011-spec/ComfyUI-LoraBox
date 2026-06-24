@@ -9,18 +9,22 @@ offering a one-row-per-LoRA design.
 
 ## Features
 
-- One row per LoRA: enable toggle, searchable picker, strength slider + number.
-- Optional separate **model** / **clip** strengths (`model + clip` checkbox).
-- **Mute all** that survives a workflow save without wiping per-row on/off state.
-- Drag-to-reorder rows; duplicate LoRAs are highlighted.
+- One row per LoRA: on/off switch, searchable picker, strength slider + number.
+- Calm by default: secondary settings (**mute all**, separate **model/clip**
+  strengths, **trigger merge position** + delimiter) live behind a ⚙ disclosure.
+- A live **active count** in the header; **mute all** survives a workflow save
+  without wiping per-row on/off state.
+- Drag-to-reorder rows; duplicate LoRAs get an explicit "duplicate" badge.
+- **Reversible delete**: removing a row shows an *Undo* toast.
 - Per-row trigger words: auto-detected from real safetensors trigger fields
   (not noisy training tags), fully editable, resettable to auto. Merged straight
   into the `prompt` output.
-- **Per-LoRA preview pictures**: each row shows a thumbnail of the LoRA so they
-  are easy to tell apart. Click the thumbnail to attach an image, hover to
-  enlarge it, ✕ to remove. The picture is stored as a sidecar next to the
-  `.safetensors` (same basename), so it *belongs to the LoRA* and shows in every
-  workflow / every Lora Box once set.
+- **Per-LoRA preview pictures**: each row shows a thumbnail so LoRAs are easy to
+  tell apart. The LoRA's own preview (`<lora>.preview.png`, as dropped by
+  Civitai / model managers) loads **automatically**; otherwise click *or drag &
+  drop* an image to set your own. Hover to enlarge, ✕ to remove (reverts to the
+  auto one). A custom image is stored as a sidecar next to the `.safetensors`,
+  so it *belongs to the LoRA* and shows in every workflow / every Lora Box.
 
 ## Node
 

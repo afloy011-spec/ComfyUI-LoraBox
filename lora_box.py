@@ -218,10 +218,15 @@ def _find_preview(name):
     base = _preview_base(name)
     if not base:
         return None
-    for ext in PREVIEW_EXTS:
-        p = base + ext
-        if os.path.exists(p):
-            return p
+    # A manually-set sidecar (<lora>.png) wins; otherwise fall back to the
+    # LoRA's own preview that Civitai / model managers drop next to the file
+    # (<lora>.preview.png). So a picture appears automatically when one exists,
+    # and a user upload (plain suffix, checked first) overrides it.
+    for suffix in ("", ".preview"):
+        for ext in PREVIEW_EXTS:
+            p = base + suffix + ext
+            if os.path.exists(p):
+                return p
     return None
 
 
