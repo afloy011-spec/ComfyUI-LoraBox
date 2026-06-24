@@ -14,17 +14,20 @@ offering a one-row-per-LoRA design.
   strengths, **trigger merge position** + delimiter) live behind a ⚙ disclosure.
 - A live **active count** in the header; **mute all** survives a workflow save
   without wiping per-row on/off state.
-- Drag-to-reorder rows; duplicate LoRAs get an explicit "duplicate" badge.
+- Drag-to-reorder by grabbing the coloured left bar of a card (it doubles as
+  the active/disabled indicator); duplicate LoRAs get an explicit "duplicate" badge.
 - **Reversible delete**: removing a row shows an *Undo* toast.
 - Per-row trigger words: auto-detected from real safetensors trigger fields
   (not noisy training tags), fully editable, resettable to auto. Merged straight
   into the `prompt` output.
 - **Per-LoRA preview pictures**: each row shows a thumbnail so LoRAs are easy to
   tell apart. The LoRA's own preview (`<lora>.preview.png`, as dropped by
-  Civitai / model managers) loads **automatically**; otherwise click *or drag &
-  drop* an image to set your own. Hover to enlarge, ✕ to remove (reverts to the
-  auto one). A custom image is stored as a sidecar next to the `.safetensors`,
-  so it *belongs to the LoRA* and shows in every workflow / every Lora Box.
+  Civitai / model managers) loads **automatically**; otherwise an empty
+  thumbnail offers **✨ Generate** (a quick test render — pick *Character* or
+  *Style* so style LoRAs get a scene, not a portrait) or **＋ Add** (your own
+  image, click or drag & drop). Hover an image for the enlarge + regenerate /
+  replace / remove chips. A custom image is stored as a sidecar next to the
+  `.safetensors`, so it *belongs to the LoRA* and shows in every Lora Box.
 
 ## Node
 

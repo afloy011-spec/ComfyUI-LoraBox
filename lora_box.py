@@ -410,10 +410,10 @@ class LoraBox:
         #     "rows": [...]}  (lets "mute all" survive a workflow save without
         #     wiping each row's real on/off state; pos/delim drive prompt merge)
         muted = False
-        pos, delim = "end", ", "
+        pos, delim = "beginning", ", "
         if isinstance(obj, dict):
             muted = bool(obj.get("mute"))
-            pos = obj.get("pos", "end") or "end"
+            pos = obj.get("pos", "beginning") or "beginning"
             delim = obj.get("delim", ", ")
             if delim is None:
                 delim = ", "

@@ -261,21 +261,25 @@ function injectStyle() {
 /* list + cards */
 .lorabox .lb-list{display:flex; flex-direction:column; gap:${GAP}px;}
 .lorabox .lb-card{position:relative; display:flex; flex-direction:column; gap:7px; min-width:0;
-  padding:9px 10px 9px 14px; border-radius:11px;
+  padding:9px 10px 9px 17px; border-radius:11px;
   background:linear-gradient(180deg, var(--comfy-input-bg,#1e1e1e),
     color-mix(in srgb, var(--comfy-input-bg,#1e1e1e) 85%, #000));
   border:1px solid var(--border-color,#363636);
   transition:opacity .14s, border-color .14s, box-shadow .14s;}
-/* left accent stripe = "this lora is active" (a non-colour cue: its presence) */
-.lorabox .lb-card::before{content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px;
-  border-radius:0 3px 3px 0; background:var(--p-button-primary-background,#3b82f6);
-  opacity:.92; transition:opacity .14s, background .14s;}
-.lorabox .lb-card.lb-off::before{opacity:0;}
+/* the left bar IS the drag handle — grab it to reorder. Blue = active,
+   grey = disabled, so the colour also doubles as the on/off cue. */
+.lorabox .lb-stripe{position:absolute; left:0; top:0; bottom:0; width:13px; cursor:grab;
+  display:flex; align-items:center;}
+.lorabox .lb-stripe::after{content:""; width:4px; height:calc(100% - 18px); border-radius:0 4px 4px 0;
+  background:var(--p-button-primary-background,#3b82f6); transition:background .14s, width .12s;}
+.lorabox .lb-card.lb-off .lb-stripe::after{background:var(--border-color,#5a5a5a);}
+.lorabox .lb-card.lb-dup .lb-stripe::after{background:#d8932f;}
+.lorabox .lb-stripe:hover::after{width:6px;}
+.lorabox .lb-stripe:active{cursor:grabbing;}
 .lorabox .lb-card:hover{border-color:var(--p-button-primary-background,#5273b8);
   box-shadow:0 4px 14px rgba(0,0,0,.3);}
 .lorabox .lb-card.lb-off{opacity:.5;}
 .lorabox .lb-card.lb-dup{border-color:#b9802f;}
-.lorabox .lb-card.lb-dup::before{background:#d8932f; opacity:1;}
 /* explicit text badge so a duplicate isn't conveyed by colour alone */
 .lorabox .lb-card.lb-dup::after{content:"duplicate"; position:absolute; top:-7px; right:10px;
   font-size:8px; line-height:1.4; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
@@ -323,12 +327,7 @@ function injectStyle() {
 
 /* row line 1: grip · switch · name · actions */
 .lorabox .lb-l1{display:flex; align-items:center; gap:8px; min-width:0; height:28px;}
-.lorabox .lb-drag{flex:0 0 auto; width:12px; height:28px; display:flex; align-items:center;
-  justify-content:center; cursor:grab; color:var(--descrip-text,#666); font-size:11px; line-height:1;
-  user-select:none; opacity:.45; transition:opacity .12s, color .12s;}
-.lorabox .lb-card:hover .lb-drag{opacity:1;}
-.lorabox .lb-drag:hover{color:var(--input-text,#ccc);}
-.lorabox .lb-drag:active{cursor:grabbing;}
+.lorabox .lb-ico svg{display:block;}
 .lorabox .lb-name{display:flex; align-items:center; gap:6px; flex:1 1 auto; min-width:0; height:28px;
   padding:0 10px; cursor:pointer; user-select:none; border-radius:7px;
   background:var(--comfy-menu-bg,#262626); color:var(--input-text,#eee);
@@ -419,6 +418,19 @@ function injectStyle() {
   box-shadow:0 12px 36px rgba(0,0,0,.6);}
 .lb-thumb-pop img{display:block; max-width:280px; max-height:280px; border-radius:6px;}
 
+/* generate-preview type menu (Character / Style) */
+.lb-menu{position:fixed; z-index:10015; display:flex; flex-direction:column; gap:2px; padding:5px;
+  min-width:200px; border-radius:9px; background:var(--comfy-menu-bg,#222);
+  border:1px solid var(--border-color,#555); box-shadow:0 12px 34px rgba(0,0,0,.55); font-family:sans-serif;}
+.lb-menu-head{font-size:9px; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--descrip-text,#888); padding:3px 9px 4px;}
+.lb-menu-item{display:flex; flex-direction:column; gap:1px; align-items:flex-start; padding:7px 9px;
+  border:none; border-radius:6px; background:transparent; color:var(--input-text,#ddd);
+  cursor:pointer; text-align:left; font-family:inherit;}
+.lb-menu-item:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
+.lb-menu-item .t{font-size:12px; font-weight:600;}
+.lb-menu-item .d{font-size:10px; opacity:.8;}
+
 /* undo toast */
 .lb-toast{position:fixed; left:50%; bottom:26px; transform:translate(-50%,12px); opacity:0; z-index:10030;
   display:flex; align-items:center; gap:14px; padding:10px 15px; border-radius:10px;
@@ -435,6 +447,52 @@ function injectStyle() {
 
 const round2 = (v) => (Math.round(v * 100) / 100).toString();
 const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.toggle("zero", v === 0); };
+
+// a tag glyph for the trigger-words toggle (clearer than the old ⓘ)
+const TAG_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/></svg>';
+// explains how a LoRA weight can be negative (the "minus" people don't expect)
+const STRENGTH_TIP = "Strength: 1.0 = normal, 0 = off, below 0 = anti-LoRA (pushes the image away from this concept), up to 3 = stronger than trained.";
+
+/* ---- generate-preview type menu (Character / Style …) ------------------- */
+const GEN_KINDS = [
+    ["character", "Character / portrait", "renders a person — best for character & face LoRAs"],
+    ["style", "Style / scene", "renders an everyday scene — best for style LoRAs"],
+];
+let GEN_MENU = null;
+function onGenDocDown(e) { if (GEN_MENU && !GEN_MENU.contains(e.target)) closeGenMenu(); }
+function closeGenMenu() {
+    if (!GEN_MENU) return;
+    document.removeEventListener("mousedown", onGenDocDown, true);
+    GEN_MENU.remove(); GEN_MENU = null;
+}
+function openGenMenu(anchor, cb) {
+    closeGenMenu();
+    const m = document.createElement("div");
+    m.className = "lb-menu";
+    const head = document.createElement("div");
+    head.className = "lb-menu-head"; head.textContent = "Generate preview as…";
+    m.appendChild(head);
+    GEN_KINDS.forEach(([k, label, desc]) => {
+        const it = document.createElement("button");
+        it.className = "lb-menu-item";
+        const t = document.createElement("span"); t.className = "t"; t.textContent = label;
+        const d = document.createElement("span"); d.className = "d"; d.textContent = desc;
+        it.append(t, d);
+        it.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); closeGenMenu(); cb(k); };
+        m.appendChild(it);
+    });
+    stop(m);
+    document.body.appendChild(m);
+    const r = anchor.getBoundingClientRect();
+    const mw = m.offsetWidth, mh = m.offsetHeight;
+    let left = Math.min(r.left, window.innerWidth - mw - 8);
+    let top = r.bottom + 4;
+    if (top + mh > window.innerHeight - 8) top = r.top - mh - 4;
+    m.style.left = Math.max(8, left) + "px";
+    m.style.top = Math.max(8, top) + "px";
+    GEN_MENU = m;
+    setTimeout(() => document.addEventListener("mousedown", onGenDocDown, true), 0);
+}
 
 /* Force the panel's root element to span the node's content width. The
  * frontend positions/sizes DOM widgets reactively off the widget's HEIGHT, so
@@ -632,7 +690,7 @@ app.registerExtension({
             node._lbRows = [];
             node._lbSep = false;
             node._lbMute = false;
-            node._lbPos = "end";
+            node._lbPos = "beginning";
             node._lbDelim = ", ";
             node._lbOptsOpen = false;
             node._lbContentH = 150;
@@ -690,7 +748,7 @@ app.registerExtension({
             [["end", "at end of prompt"], ["beginning", "at start of prompt"]].forEach(([v, t]) => {
                 const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
             });
-            sel.value = node._lbPos || "end";
+            sel.value = node._lbPos || "beginning";
             sel.onchange = () => { node._lbPos = sel.value; serialize(node); };
             stop(sel); eatWheel(sel);
             node._lbPosSel = sel;
@@ -778,7 +836,7 @@ app.registerExtension({
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
-        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); closeToast(); onRemoved && onRemoved.apply(this, arguments); };
+        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); closeGenMenu(); closeToast(); onRemoved && onRemoved.apply(this, arguments); };
     },
 });
 
@@ -902,7 +960,7 @@ function initFromData(node) {
     node._lbDataW = dataW;
     let parsed = [];
     try { parsed = JSON.parse(dataW?.value || "[]"); } catch (e) { parsed = []; }
-    let rows = parsed, mute = false, pos = "end", delim = ", ";
+    let rows = parsed, mute = false, pos = "beginning", delim = ", ";
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
         mute = !!parsed.mute;
         if (typeof parsed.pos === "string") pos = parsed.pos;
@@ -975,12 +1033,13 @@ function renderRows(node) {
         const card = document.createElement("div");
         card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "");
 
+        // the coloured left bar doubles as the drag handle
+        const stripe = document.createElement("div");
+        stripe.className = "lb-stripe"; stripe.title = "drag to reorder";
+        attachReorder(node, card, stripe, i);
+
         const l1 = document.createElement("div");
         l1.className = "lb-l1";
-
-        const handle = document.createElement("div");
-        handle.className = "lb-drag"; handle.textContent = "⠿"; handle.title = "drag to reorder";
-        attachReorder(node, card, handle, i);
 
         const sw = mkSwitch(row.on, "enable / disable this LoRA", (v) => {
             row.on = v; card.classList.toggle("lb-off", rowOff(node, row));
@@ -998,7 +1057,8 @@ function renderRows(node) {
         stop(field);
 
         const trig = document.createElement("button");
-        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.textContent = "ⓘ"; trig.title = "trigger words";
+        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.innerHTML = TAG_SVG;
+        trig.title = "trigger words — the keywords this LoRA responds to";
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
         stop(trig);
 
@@ -1016,15 +1076,16 @@ function renderRows(node) {
         };
         stop(del);
 
-        l1.append(handle, sw, field, trig, del);
+        l1.append(sw, field, trig, del);
 
         const l2 = document.createElement("div");
         l2.className = "lb-l2";
 
         const slider = document.createElement("input");
         slider.className = "lb-slider"; slider.type = "range";
-        slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm); slider.title = "strength";
-        const num = mkNum(row.sm, node._lbSep ? "model strength" : "strength",
+        slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm);
+        slider.title = STRENGTH_TIP;
+        const num = mkNum(row.sm, (node._lbSep ? "Model strength. " : "") + STRENGTH_TIP,
             (v) => { row.sm = v; slider.value = String(v); serialize(node); });
         slider.oninput = () => { row.sm = clampS(parseFloat(slider.value)); num.value = round2(row.sm); tintNum(num, row.sm); serialize(node); };
         stop(slider); eatWheel(slider);
@@ -1032,7 +1093,7 @@ function renderRows(node) {
         l2.append(slider, num);
         if (node._lbSep) {
             const tag = document.createElement("span"); tag.className = "lb-clip"; tag.textContent = "clip";
-            const cnum = mkNum(row.sc != null ? row.sc : row.sm, "clip strength", (v) => { row.sc = v; serialize(node); });
+            const cnum = mkNum(row.sc != null ? row.sc : row.sm, "CLIP strength. " + STRENGTH_TIP, (v) => { row.sc = v; serialize(node); });
             l2.append(tag, cnum);
         }
 
@@ -1044,7 +1105,7 @@ function renderRows(node) {
         main.className = "lb-main";
         main.append(buildThumb(node, row), content);
 
-        card.append(main);
+        card.append(stripe, main);
         if (row._open) card.append(buildTrigEditor(node, row));
 
         list.appendChild(card);
@@ -1122,19 +1183,19 @@ function buildThumb(node, row) {
         inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) applyFile(f); };
         inp.click();
     };
-    const doGen = async (btn, busyHTML) => {
+    const doGen = async (btn, busyHTML, kind) => {
         if (btn.classList.contains("busy")) return;
         const html = btn.innerHTML;
         btn.classList.add("busy"); btn.innerHTML = busyHTML;
-        const res = await generatePreview(row.name, "character");
+        const res = await generatePreview(row.name, kind);
         btn.classList.remove("busy"); btn.innerHTML = html;
         if (res && res.ok) { evictPreview(row.name); refresh(); }
         else alert("Preview generation failed: " + ((res && res.error) || "unknown error"));
     };
 
-    genBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; doGen(genBtn, '<span class="i">⏳</span><span>…</span>'); };
+    genBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; openGenMenu(genBtn, (k) => doGen(genBtn, '<span class="i">⏳</span><span>…</span>', k)); };
     addBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
-    chipGen.onclick = (e) => { e.stopPropagation(); if (needLora()) return; doGen(chipGen, "⏳"); };
+    chipGen.onclick = (e) => { e.stopPropagation(); if (needLora()) return; openGenMenu(chipGen, (k) => doGen(chipGen, "⏳", k)); };
     chipRep.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
     chipX.onclick = async (e) => {
         e.stopPropagation();

@@ -69,8 +69,8 @@ def build_preview_prompt(lora_name: str, kind: str = "character") -> dict:
 
     triggers = ", ".join(trigger_words_for(lora_name))
     base = PREVIEW_PROMPTS[kind]
-    pos = "beginning" if kind == "character" else "end"
-    positive = merge_prompt(base, triggers, pos, ", ")
+    # trigger words go in front by default (stronger activation on the encoder)
+    positive = merge_prompt(base, triggers, "beginning", ", ")
 
     cfg = PREVIEW_CONFIG
     return {

@@ -57,12 +57,14 @@ class TestPreviewGenerate(unittest.TestCase):
                    and "herotok" in v["inputs"]["text"])
         self.assertIn("portrait photo", pos["inputs"]["text"])
 
-    def test_style_puts_triggers_at_end(self):
+    def test_triggers_go_in_front(self):
+        # trigger words are placed in front of the base prompt for every kind
+        # (stronger activation on the encoder).
         _write_lora("style.safetensors", {"trigger_phrase": "warmpastel"})
         p = preview_generate.build_preview_prompt("style.safetensors", "style")
         text = next(v["inputs"]["text"] for v in p.values()
                     if v["class_type"] == "CLIPTextEncode" and "warmpastel" in v["inputs"]["text"])
-        self.assertTrue(text.index("warmpastel") > text.index("cafe"))
+        self.assertTrue(text.index("warmpastel") < text.index("cafe"))
 
     def test_fixed_seed_in_sampler(self):
         _write_lora("x.safetensors")
