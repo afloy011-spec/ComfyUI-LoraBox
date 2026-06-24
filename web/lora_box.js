@@ -301,16 +301,21 @@ function injectStyle() {
 @keyframes lb-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 
 /* row line 1: switch · name(grows, borderless) · bookmark · delete */
-.lorabox .lb-l1{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:8px;
-  align-items:center; min-width:0; height:18px;}
+.lorabox .lb-l1{display:grid; grid-template-columns:auto minmax(90px,1fr) auto auto; gap:8px;
+  align-items:center; min-width:0; height:24px;}
 .lorabox .lb-ico svg{display:block;}
-.lorabox .lb-name{display:flex; align-items:center; min-width:0; height:18px; cursor:pointer;
-  user-select:none; padding:0; background:transparent; border:none; color:#f0f0f0; transition:color .12s;}
-.lorabox .lb-name:hover .txt{color:#fff; text-decoration:underline; text-decoration-color:#555; text-underline-offset:2px;}
-.lorabox .lb-name.open .txt{color:#7aa2f0;}
+/* the LoRA picker field — a visible, clickable combobox (min 90px so it can
+   never collapse), so there's always a clear "choose a LoRA" control. */
+.lorabox .lb-name{display:flex; align-items:center; gap:6px; min-width:0; height:24px; padding:0 9px;
+  cursor:pointer; user-select:none; border-radius:6px; color:#f0f0f0;
+  background:var(--comfy-menu-bg,#262626); border:1px solid transparent;
+  transition:background .12s, border-color .12s;}
+.lorabox .lb-name:hover{background:var(--comfy-menu-bg,#2e2e2e); border-color:var(--border-color,#3a3a3a);}
+.lorabox .lb-name.open{border-color:#3b82f6;}
 .lorabox .lb-name .txt{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   font-size:12px; font-weight:500;}
-.lorabox .lb-name .txt.none{color:#888; font-weight:400;}
+.lorabox .lb-name .txt.none{color:#9a9a9a; font-weight:400;}
+.lorabox .lb-name .car{flex:0 0 auto; color:#777; font-size:9px;}
 .lorabox .lb-ico{width:18px; height:18px; flex:0 0 auto; padding:0; cursor:pointer; display:flex;
   align-items:center; justify-content:center; background:transparent; color:#888; border:none;
   border-radius:4px; line-height:1; transition:background .12s, color .12s;}
@@ -1081,7 +1086,8 @@ function renderRows(node) {
         const txt = document.createElement("span");
         txt.className = "txt" + (!row.name || row.name === "None" ? " none" : "");
         txt.textContent = row.name && row.name !== "None" ? row.name : "Choose a LoRA…";
-        field.append(txt);
+        const car = document.createElement("span"); car.className = "car"; car.textContent = "▼";
+        field.append(txt, car);
         field.onclick = (e) => { e.stopPropagation(); openPicker(node, row, field); };
         stop(field);
 
