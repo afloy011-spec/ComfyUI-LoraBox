@@ -70,16 +70,40 @@ async function fetchAuto(name) {
 }
 
 /* ---- per-lora preview images -------------------------------------------- */
-// Fetch the sidecar preview for a lora as an object URL, or null if none.
+// Cache the resolved object URL per lora name (null = checked, none exists).
+// Shared across every card/render so re-rendering the list (drag-reorder, a
+// toggle, opening the trigger editor, …) reuses the already-loaded image
+// instead of refetching it — refetching is what made thumbnails flicker on
+// every interaction. Entries are evicted only when the picture actually
+// changes (upload / delete).
+const PREVIEW_CACHE = new Map();      // name -> objectURL | null
+const PREVIEW_PROMISES = new Map();   // name -> in-flight Promise (de-dupe)
+
+function evictPreview(name) {
+    if (PREVIEW_CACHE.has(name)) {
+        const u = PREVIEW_CACHE.get(name);
+        if (u) { try { URL.revokeObjectURL(u); } catch (e) {} }
+        PREVIEW_CACHE.delete(name);
+    }
+    PREVIEW_PROMISES.delete(name);
+}
+
+// Resolve a lora's sidecar preview as an object URL, or null if none.
 async function loadPreviewURL(name) {
     if (!name || name === "None") return null;
-    try {
-        const r = await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name) + "&t=" + Date.now());
-        if (!r.ok) return null;
-        const b = await r.blob();
-        if (!b || !b.size) return null;
-        return URL.createObjectURL(b);
-    } catch (e) { return null; }
+    if (PREVIEW_CACHE.has(name)) return PREVIEW_CACHE.get(name);
+    if (PREVIEW_PROMISES.has(name)) return PREVIEW_PROMISES.get(name);
+    const p = (async () => {
+        try {
+            const r = await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name));
+            if (!r.ok) return null;
+            const b = await r.blob();
+            if (!b || !b.size) return null;
+            return URL.createObjectURL(b);
+        } catch (e) { return null; }
+    })().then((u) => { PREVIEW_CACHE.set(name, u); PREVIEW_PROMISES.delete(name); return u; });
+    PREVIEW_PROMISES.set(name, p);
+    return p;
 }
 
 async function uploadPreview(name, file) {
@@ -861,16 +885,19 @@ function buildThumb(node, row) {
     thumb.append(img, ph, x);
 
     const setURL = (url) => {
-        if (thumb._url) { try { URL.revokeObjectURL(thumb._url); } catch (e) {} }
+        // URLs are owned by PREVIEW_CACHE (shared across renders) — do NOT revoke
+        // here or a sibling card showing the same lora would lose its image.
         thumb._url = url || null;
-        if (url) { img.src = url; thumb.classList.add("has-img"); }
+        if (url) { if (img.src !== url) img.src = url; thumb.classList.add("has-img"); }
         else { img.removeAttribute("src"); thumb.classList.remove("has-img"); }
     };
     const refresh = () => {
         if (!row.name || row.name === "None") { setURL(null); return; }
+        // synchronous when cached → the image is there on the first frame, so a
+        // re-render (e.g. drag-reorder) never flashes empty.
+        if (PREVIEW_CACHE.has(row.name)) { setURL(PREVIEW_CACHE.get(row.name)); return; }
         loadPreviewURL(row.name).then((u) => {
-            // guard against a stale async result after the row name changed
-            if (document.body.contains(thumb)) setURL(u);
+            if (document.body.contains(thumb) && row.name && row.name !== "None") setURL(u);
         });
     };
     thumb._lbRefresh = refresh;
@@ -886,7 +913,7 @@ function buildThumb(node, row) {
             if (!f) return;
             if (f.size > 8 * 1024 * 1024) { alert("Image too large (max 8 MB)."); return; }
             const ok = await uploadPreview(row.name, f);
-            if (ok) refresh();
+            if (ok) { evictPreview(row.name); refresh(); }
         };
         inp.click();
     };
@@ -895,6 +922,7 @@ function buildThumb(node, row) {
         if (!row.name || row.name === "None") return;
         closeThumbPop();
         await deletePreview(row.name);
+        evictPreview(row.name);
         refresh();
     };
     thumb.onmouseenter = () => { if (thumb._url) openThumbPop(thumb, thumb._url); };
