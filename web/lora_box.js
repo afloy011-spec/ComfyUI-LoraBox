@@ -32,6 +32,92 @@ const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 18, TRIG_MIN = 28;
 const SMIN = 0, SMAX = 2;
 const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
 
+/* ---- looping video background (ported from the timur branch) -------------
+ * The title bar is painted by litegraph AFTER onDrawBackground, so a single
+ * background draw can't cover it. Trick: draw the SAME source with the SAME
+ * dest rect [0,-titleH, W, titleH+bodyH] in BOTH callbacks but clip each to its
+ * own region — body slice in onDrawBackground (behind slots/widget), title slice
+ * in onDrawForeground (over the title bar). Identical dest ⇒ the y=0 seam lines
+ * up invisibly. Until the video is ready we fall back to the first lora's
+ * preview image. */
+const BG_ALPHA = 0.4;                  // background opacity
+const BG_BASE = "#141414";             // opaque base painted under the image (matches --lb-bg)
+const _bgCache = {};                   // lora name -> HTMLImageElement
+function _titleH() { return (typeof LiteGraph !== "undefined" && LiteGraph.NODE_TITLE_HEIGHT) || 30; }
+function bgImageFor(node) {
+    const rows = node._lbRows || [];
+    let name = null;
+    for (const r of rows) { if (r && r.name && r.name !== "None") { name = r.name; break; } }
+    if (!name) return null;
+    let im = _bgCache[name];
+    if (!im) {
+        im = new Image();
+        _bgCache[name] = im;
+        im.onload = () => { im._ok = true; node.setDirtyCanvas(true, true); };
+        im.onerror = () => { im._err = true; };
+        im.src = "/lorabox/preview?file=" + encodeURIComponent(name);
+        return null;
+    }
+    return im._ok ? im : null;
+}
+function drawCover(ctx, src, dx, dy, dw, dh) {
+    const iw = src.videoWidth || src.naturalWidth, ih = src.videoHeight || src.naturalHeight;
+    if (!iw || !ih) return;
+    const s = Math.max(dw / iw, dh / ih);   // cover: fill dest, crop overflow
+    const cw = dw / s, ch = dh / s;
+    ctx.drawImage(src, (iw - cw) / 2, (ih - ch) / 2, cw, ch, dx, dy, dw, dh);
+}
+let VIDEO = null;
+function ensureVideo() {
+    if (VIDEO) return VIDEO;
+    const v = document.createElement("video");
+    v.src = new URL("./katosik_loop.mp4", import.meta.url).href;
+    v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+    v.play().catch(() => {});
+    VIDEO = v;
+    const pump = () => {
+        if (app.canvas) app.canvas.setDirty(true, true);   // repaint to show next frame
+        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(pump);
+        else requestAnimationFrame(pump);
+    };
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(pump);
+    else requestAnimationFrame(pump);
+    return v;
+}
+function bgSource(node) {
+    const v = ensureVideo();
+    if (v && v.readyState >= 2 && v.videoWidth) return v;   // animated loop once ready
+    return bgImageFor(node);                                 // static preview until then
+}
+function drawBgSlice(node, ctx, region) {
+    if (node.flags && node.flags.collapsed) return;
+    const src = bgSource(node);
+    if (!src) return;
+    const W = node.size[0], bodyH = node.size[1], tH = _titleH(), totalH = tH + bodyH;
+    ctx.save();
+    ctx.beginPath();
+    if (region === "title") ctx.rect(0, -tH, W, tH);   // title-bar strip
+    else ctx.rect(0, 0, W, bodyH);                      // body
+    ctx.clip();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = BG_BASE;
+    ctx.fillRect(0, -tH, W, totalH);
+    ctx.globalAlpha = BG_ALPHA;
+    drawCover(ctx, src, 0, -tH, W, totalH);            // SAME dest rect in both
+    ctx.restore();
+    // the opaque base covers the title text in the title strip — redraw it
+    if (region === "title" && node.title) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#e8e8e8";
+        ctx.font = "14px Arial";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(node.title, 18, -tH / 2);
+        ctx.restore();
+    }
+}
+
 let LORA_LIST = null;
 let LORA_LIST_PROMISE = null;
 let LORA_CATEGORIES = null;
@@ -416,6 +502,13 @@ function injectStyle() {
 .lb-pop-item:hover,.lb-pop-item.hi{background:var(--lb-accent,#3b82f6); color:#fff;}
 .lb-pop-item:hover .chk,.lb-pop-item.hi .chk{color:#fff;}
 .lb-pop-empty{padding:8px; color:#888; font-size:11px; font-style:italic;}
+/* model-aware picker: compatibility toggle bar + dimmed incompatible items */
+.lb-pop-bar{display:flex; align-items:center; gap:8px; flex:0 0 auto; padding:5px 9px; cursor:pointer;
+  font-size:11px; color:#aaa; user-select:none; border-bottom:1px solid var(--lb-border,#2e2e2e);}
+.lb-pop-bar input{cursor:pointer; margin:0;}
+.lb-pop-bar b{color:var(--lb-accent,#3b82f6); font-weight:600;}
+.lb-pop-item.dim{opacity:.45;}
+.lb-pop-item.dim:hover,.lb-pop-item.dim.hi{opacity:1;}
 .lb-thumb-pop{position:fixed; z-index:10020; padding:4px; border-radius:10px; pointer-events:none;
   background:var(--comfy-menu-bg,#1c1c1c); border:1px solid var(--border-color,var(--lb-border,#2e2e2e));
   box-shadow:0 12px 36px rgba(0,0,0,.6);}
@@ -605,6 +698,53 @@ function closePop() {
     p.remove();
 }
 
+/* ---- best-effort: which base model is wired into the MODEL input? --------
+ * (ported from the timur branch) No architecture flows on a MODEL link, so we
+ * trace upstream to the loader and guess from its model filename / node name.
+ * Returns a label matching LORA_GROUP_ORDER, or null when unsure — in which
+ * case the picker just behaves normally (we never hide on a guess). */
+function archFromName(s) {
+    const low = (s || "").toLowerCase().replace(/\\/g, "/");
+    if (/zimage|z-image|z_image/.test(low)) return "Z-Image";
+    if (/ltx/.test(low)) return "LTX Video";
+    if (/flux/.test(low)) return "Flux";
+    if (/krea/.test(low)) return "Krea";
+    return null;
+}
+function archFromNode(n) {
+    if (!n) return null;
+    let a = archFromName(n.type) || archFromName(n.title);
+    if (a) return a;
+    for (const w of (n.widgets || [])) {
+        if (typeof w.value === "string") { a = archFromName(w.value); if (a) return a; }
+    }
+    return null;
+}
+function getLinkById(graph, id) {
+    if (id == null || !graph || !graph.links) return null;
+    return graph.links.get ? graph.links.get(id) : graph.links[id];
+}
+function traceModelArch(n, depth) {
+    if (!n || !n.graph || depth > 16) return null;
+    // follow a MODEL input upstream (passthroughs: sampling, patches, lora stacks, us)
+    const mi = (n.inputs || []).find((i) => i.type === "MODEL" && i.link != null);
+    if (mi) {
+        const link = getLinkById(n.graph, mi.link);
+        const up = link && traceModelArch(n.graph.getNodeById(link.origin_id), depth + 1);
+        if (up) return up;
+    }
+    // reroute / generic passthrough
+    if (/reroute/i.test(n.type || "") && (n.inputs || [])[0] && n.inputs[0].link != null) {
+        const link = getLinkById(n.graph, n.inputs[0].link);
+        const up = link && traceModelArch(n.graph.getNodeById(link.origin_id), depth + 1);
+        if (up) return up;
+    }
+    return archFromNode(n);   // treat as the source loader
+}
+function detectModelArch(node) {
+    try { return traceModelArch(node, 0); } catch (e) { return null; }
+}
+
 async function openPicker(node, row, fieldEl) {
     if (CUR_POP && CUR_POP._anchor === fieldEl) { closePop(); return; }
     closePop();
@@ -635,6 +775,23 @@ async function openPicker(node, row, fieldEl) {
     fieldEl.classList.add("open");
 
     const all = LORA_LIST || [];
+
+    // model-aware: detect the wired model's architecture (best-effort). When
+    // known, surface matching loras first + an "only compatible" toggle.
+    const modelArch = detectModelArch(node);
+    let onlyCompat = false;
+    if (modelArch) {
+        const bar = document.createElement("label");
+        bar.className = "lb-pop-bar";
+        const cb = document.createElement("input"); cb.type = "checkbox";
+        const txt = document.createElement("span");
+        txt.innerHTML = "model: <b>" + modelArch + "</b> · only compatible";
+        cb.onchange = () => { onlyCompat = cb.checked; draw(search.value); };
+        stop(cb);
+        bar.append(cb, txt);
+        searchWrap.after(bar);
+    }
+
     let hi = 0;
     const setHi = (items) => {
         items.forEach((x) => x.classList.remove("hi"));
@@ -646,7 +803,12 @@ async function openPicker(node, row, fieldEl) {
     const draw = (flt) => {
         listEl.innerHTML = "";
         hi = 0;
-        const groups = groupedLoraList(all, flt);
+        let groups = groupedLoraList(all, flt);
+        if (modelArch) {
+            // matching architecture first; "only compatible" hides the rest (keeps None)
+            if (onlyCompat) groups = groups.filter((g) => g.label === modelArch || g.label === null);
+            else groups = groups.slice().sort((a, b) => (a.label === modelArch ? 0 : 1) - (b.label === modelArch ? 0 : 1));
+        }
         const flat = groups.flatMap((g) => g.items);
         if (!flat.length) {
             const e = document.createElement("div");
@@ -659,19 +821,20 @@ async function openPicker(node, row, fieldEl) {
             if (grp.label) {
                 const hdr = document.createElement("div");
                 hdr.className = "lb-pop-group";
-                hdr.textContent = grp.label;
+                hdr.textContent = grp.label === modelArch ? grp.label + "  ✓ matches model" : grp.label;
                 listEl.appendChild(hdr);
             }
             for (const n of grp.items) {
+                const incompat = modelArch && grp.label && grp.label !== modelArch && n !== "None";
                 const it = document.createElement("button");
                 it.type = "button";
-                it.className = "lb-pop-item" + (n === row.name ? " sel" : "");
+                it.className = "lb-pop-item" + (n === row.name ? " sel" : "") + (incompat ? " dim" : "");
                 it.dataset.value = n;
                 const chk = document.createElement("span"); chk.className = "chk"; chk.innerHTML = CHECK_SVG;
                 const lbl = document.createElement("span"); lbl.className = "lbl";
                 lbl.textContent = n === "None" ? "— None —" : n;
+                it.title = incompat ? n + "  (different architecture than your model)" : n;
                 it.append(chk, lbl);
-                it.title = n;
                 it.onmousedown = (e) => { e.preventDefault(); pick(n); };
                 listEl.appendChild(it);
             }
@@ -884,9 +1047,17 @@ app.registerExtension({
         };
 
         const onDrawForeground = nodeType.prototype.onDrawForeground;
-        nodeType.prototype.onDrawForeground = function () {
+        nodeType.prototype.onDrawForeground = function (ctx) {
             onDrawForeground && onDrawForeground.apply(this, arguments);
             fitRootWidth(this);
+            drawBgSlice(this, ctx, "title");   // video/preview slice over the title bar
+        };
+
+        // body slice of the same source, drawn behind the slots and DOM panel
+        const onDrawBackground = nodeType.prototype.onDrawBackground;
+        nodeType.prototype.onDrawBackground = function (ctx) {
+            onDrawBackground && onDrawBackground.apply(this, arguments);
+            drawBgSlice(this, ctx, "body");
         };
 
         const onRemoved = nodeType.prototype.onRemoved;

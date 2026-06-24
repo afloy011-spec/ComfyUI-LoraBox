@@ -18,7 +18,10 @@ import json
 import math
 import struct
 import hashlib
+import asyncio
 import logging
+import urllib.parse
+import urllib.request
 from collections import OrderedDict
 
 import folder_paths
@@ -230,6 +233,71 @@ def _find_preview(name):
     return None
 
 
+# ---- auto-fetch a preview from Civitai when the lora has no local sidecar ----
+# So "every lora shows a picture": if there is no <basename>.<ext> next to the
+# file, look the lora up on Civitai by its SHA256 and cache the first preview
+# image AS a sidecar (instant forever after). Best-effort — any failure
+# (offline / not on Civitai / unknown hash) just returns None -> 404 as before.
+# (ported from the timur branch)
+_HASH_CACHE = OrderedDict()   # path -> (mtime, sha256)
+_CIVITAI_MISS = set()         # paths we already failed to resolve; don't retry every request
+
+
+def _sha256(path):
+    mt = _mtime(path)
+    hit = _HASH_CACHE.get(path)
+    if hit and hit[0] == mt:
+        _HASH_CACHE.move_to_end(path)
+        return hit[1]
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    dig = h.hexdigest()
+    _HASH_CACHE[path] = (mt, dig)
+    while len(_HASH_CACHE) > 64:
+        _HASH_CACHE.popitem(last=False)
+    return dig
+
+
+def _http_get(url, timeout):
+    req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-LoraBox"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def _fetch_civitai_preview(name):
+    """No local sidecar -> resolve on Civitai by file hash, save <base>.<ext>. Blocking."""
+    path = _safe_lora_path(name)
+    if not path or path in _CIVITAI_MISS:
+        return None
+    base = os.path.splitext(path)[0]
+    try:
+        sha = _sha256(path)
+        meta = json.loads(_http_get(
+            "https://civitai.com/api/v1/model-versions/by-hash/" + sha, 12).decode("utf-8"))
+        img_url = next((im["url"] for im in (meta.get("images") or []) if im.get("url")), None)
+        if not img_url:
+            _CIVITAI_MISS.add(path)
+            return None
+        blob = _http_get(img_url, 25)
+        if not blob or len(blob) > MAX_PREVIEW_BYTES * 4:
+            _CIVITAI_MISS.add(path)
+            return None
+        ext = os.path.splitext(urllib.parse.urlparse(img_url).path)[1].lower()
+        if ext not in PREVIEW_EXTS:
+            ext = ".png"
+        out = base + ext
+        with open(out, "wb") as f:
+            f.write(blob)
+        log.info("fetched Civitai preview for %s", name)
+        return out
+    except Exception as e:
+        _CIVITAI_MISS.add(path)
+        log.info("Civitai preview fetch failed for %s: %s", name, e)
+        return None
+
+
 # Optional API routes so the UI can show trigger words / preview images.
 try:
     from server import PromptServer
@@ -255,7 +323,12 @@ try:
 
     @PromptServer.instance.routes.get("/lorabox/preview")
     async def _lorabox_preview_get(request):
-        p = _find_preview(request.query.get("file", ""))
+        file = request.query.get("file", "")
+        p = _find_preview(file)
+        if not p:
+            # no local sidecar: try to pull one from Civitai (hashing + network
+            # are blocking, so run off the event loop) and cache it as a sidecar
+            p = await asyncio.get_event_loop().run_in_executor(None, _fetch_civitai_preview, file)
         if not p:
             return web.Response(status=404)
         try:
