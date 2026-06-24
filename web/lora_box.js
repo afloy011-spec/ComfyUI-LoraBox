@@ -22,7 +22,7 @@ import { api } from "../../scripts/api.js";
  */
 
 const GAP = 8, MIN_W = 240, FIXED_W = 380;
-const PAD_V = 18, HEAD_H = 24, OPTS_H = 74, CARD_BASE = 80, ADD_H = 34, EMPTY_H = 46, BUFFER = 8;
+const PAD_V = 18, HEAD_H = 24, OPTS_H = 116, CARD_BASE = 80, ADD_H = 34, EMPTY_H = 46, BUFFER = 8;
 const TRIG_GAP = 8, TRIG_MIN = 28;
 // Allow negative ("anti-LoRA") and >1 weights for parity with rgthree / the
 // core loader. Default still sits at 1.0; clamp keeps it sane.
@@ -130,6 +130,23 @@ async function deletePreview(name) {
     catch (e) {}
 }
 
+// Render a quick preview on the GPU (Z-Image test) and save it as the sidecar.
+async function generatePreview(name, kind = "character") {
+    if (!name || name === "None") return { ok: false, error: "no lora selected" };
+    const url = "/lorabox/preview/generate?file=" + encodeURIComponent(name) + "&kind=" + encodeURIComponent(kind);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 190000);
+    try {
+        const r = await api.fetchApi(url, { method: "POST", signal: ctrl.signal });
+        return await r.json();
+    } catch (e) {
+        if (e && e.name === "AbortError") return { ok: false, error: "timed out (3 min)" };
+        return { ok: false, error: String(e) };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 /* floating enlarged preview on hover */
 let THUMB_POP = null;
 function closeThumbPop() { if (THUMB_POP) { THUMB_POP.remove(); THUMB_POP = null; } }
@@ -227,6 +244,8 @@ function injectStyle() {
   background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
   border:1px solid var(--border-color,#4a4a4a); border-radius:7px; font-size:11px; outline:none;}
 .lorabox .lb-opts input.lb-delim:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
+.lorabox .lb-opts .lb-hint{font-size:10px; line-height:1.45; color:var(--descrip-text,#888);}
+.lorabox .lb-opts .lb-hint b{color:var(--descrip-text,#b5b5b5); font-weight:600;}
 
 /* toggle switch */
 .lb-switch{position:relative; width:30px; height:18px; flex:0 0 auto; cursor:pointer; display:inline-block;}
@@ -277,16 +296,30 @@ function injectStyle() {
 .lorabox .lb-thumb.drag-over{border-color:var(--p-button-primary-background,#7aa2f0); border-style:dashed;}
 .lorabox .lb-thumb img{width:100%; height:100%; object-fit:cover; display:none;}
 .lorabox .lb-thumb.has-img img{display:block;}
-.lorabox .lb-thumb .lb-ph{display:flex; flex-direction:column; align-items:center; gap:1px;
-  color:var(--descrip-text,#7d7d7d); line-height:1; pointer-events:none;}
-.lorabox .lb-thumb .lb-ph .lb-ph-i{font-size:15px;}
-.lorabox .lb-thumb .lb-ph .lb-ph-t{font-size:7px; letter-spacing:.04em; text-transform:uppercase; opacity:.85;}
-.lorabox .lb-thumb.has-img .lb-ph{display:none;}
-.lorabox .lb-thumb .lb-thumb-x{position:absolute; top:2px; right:2px; width:16px; height:16px;
-  display:none; align-items:center; justify-content:center; font-size:10px; border-radius:5px;
-  background:rgba(0,0,0,.62); color:#fff; line-height:1;}
-.lorabox .lb-thumb.has-img:hover .lb-thumb-x{display:flex;}
-.lorabox .lb-thumb .lb-thumb-x:hover{background:#7a2b2b;}
+/* empty state: two labelled buttons — Generate / Add — so it is obvious how to
+   give a picture-less LoRA a preview (this is the whole "how do I generate?"). */
+.lorabox .lb-thumb-acts{position:absolute; inset:0; display:none; flex-direction:column;
+  background:var(--comfy-menu-bg,#262626);}
+.lorabox .lb-thumb:not(.has-img) .lb-thumb-acts{display:flex;}
+.lorabox .lb-thumb-btn{flex:1; display:flex; align-items:center; justify-content:center; gap:4px;
+  cursor:pointer; color:var(--descrip-text,#bcbcbc); font-size:8px; letter-spacing:.03em;
+  text-transform:uppercase; user-select:none; transition:background .12s, color .12s;}
+.lorabox .lb-thumb-btn:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
+.lorabox .lb-thumb-btn .i{font-size:12px;}
+.lorabox .lb-thumb-btn + .lb-thumb-btn{border-top:1px solid var(--border-color,#3a3a3a);}
+.lorabox .lb-thumb-btn.busy{pointer-events:none; animation:lb-pulse 1s ease infinite;}
+@keyframes lb-pulse{0%,100%{opacity:.55}50%{opacity:1}}
+/* image state: small corner chips on hover (regenerate / replace / remove) */
+.lorabox .lb-thumb-chip{position:absolute; width:16px; height:16px; display:none; align-items:center;
+  justify-content:center; font-size:10px; line-height:1; border-radius:5px; cursor:pointer;
+  background:rgba(0,0,0,.62); color:#fff;}
+.lorabox .lb-thumb.has-img:hover .lb-thumb-chip{display:flex;}
+.lorabox .lb-thumb-chip.x{top:2px; right:2px;}
+.lorabox .lb-thumb-chip.x:hover{background:#7a2b2b;}
+.lorabox .lb-thumb-chip.gen{bottom:2px; right:2px;}
+.lorabox .lb-thumb-chip.rep{bottom:2px; left:2px;}
+.lorabox .lb-thumb-chip.gen:hover,.lorabox .lb-thumb-chip.rep:hover{background:var(--p-button-primary-background,#3b82f6);}
+.lorabox .lb-thumb-chip.busy{pointer-events:none; animation:lb-pulse 1s ease infinite;}
 
 /* row line 1: grip · switch · name · actions */
 .lorabox .lb-l1{display:flex; align-items:center; gap:8px; min-width:0; height:28px;}
@@ -621,7 +654,7 @@ app.registerExtension({
             head.className = "lb-head";
             const title = document.createElement("span");
             title.className = "lb-title";
-            title.innerHTML = '<span class="em">🎀</span><span>Lora Box</span>';
+            title.textContent = "Lora Box";
             const count = document.createElement("span");
             count.className = "lb-count";
             node._lbCount = count;
@@ -671,7 +704,12 @@ app.registerExtension({
             node._lbDelimIn = delim;
             row2.append(tlbl, sel, dlbl, delim);
 
-            opts.append(row1, row2);
+            const hint = document.createElement("div");
+            hint.className = "lb-hint";
+            hint.innerHTML = "Trigger words are the keywords a LoRA was trained on. If you wire a " +
+                "prompt in, they're added at the <b>start</b> (stronger emphasis) or the " +
+                "<b>end</b> (a softer modifier). “sep” is what goes between them.";
+            opts.append(row1, row2, hint);
             inner.appendChild(opts);
 
             gear.onclick = (e) => {
@@ -1017,19 +1055,37 @@ function renderRows(node) {
 }
 
 /* per-row thumbnail: the lora's reference picture (shared across workflows).
- * Auto-loads the lora's own preview if it has one; click OR drop an image to
- * set your own; hover to enlarge; ✕ to remove (reverts to the auto one). */
+ * Auto-loads the lora's own preview when one exists. When empty, two labelled
+ * buttons make it obvious: ✨ Generate (a quick Z-Image render) or ＋ Add (your
+ * own image, click or drag&drop). With an image, hover shows corner chips to
+ * regenerate / replace / remove, and hovering enlarges it. */
 function buildThumb(node, row) {
     const thumb = document.createElement("div");
     thumb.className = "lb-thumb";
-    thumb.title = "Click or drop an image — the LoRA's own preview loads automatically if it has one";
     const img = document.createElement("img");
-    const ph = document.createElement("div");
-    ph.className = "lb-ph";
-    ph.innerHTML = '<span class="lb-ph-i">🖼</span><span class="lb-ph-t">add</span>';
-    const x = document.createElement("div");
-    x.className = "lb-thumb-x"; x.textContent = "✕"; x.title = "remove picture";
-    thumb.append(img, ph, x);
+
+    // empty-state buttons (visible when there is no image)
+    const acts = document.createElement("div");
+    acts.className = "lb-thumb-acts";
+    const genBtn = document.createElement("div");
+    genBtn.className = "lb-thumb-btn";
+    genBtn.innerHTML = '<span class="i">✨</span><span>gen</span>';
+    genBtn.title = "Generate a preview now — a quick Z-Image test render of this LoRA";
+    const addBtn = document.createElement("div");
+    addBtn.className = "lb-thumb-btn";
+    addBtn.innerHTML = '<span class="i">＋</span><span>add</span>';
+    addBtn.title = "Use your own image — click to pick, or drag & drop one here";
+    acts.append(genBtn, addBtn);
+
+    // image-state corner chips (shown on hover)
+    const chipGen = document.createElement("div");
+    chipGen.className = "lb-thumb-chip gen"; chipGen.textContent = "✨"; chipGen.title = "Regenerate preview";
+    const chipRep = document.createElement("div");
+    chipRep.className = "lb-thumb-chip rep"; chipRep.textContent = "＋"; chipRep.title = "Replace with your own image";
+    const chipX = document.createElement("div");
+    chipX.className = "lb-thumb-chip x"; chipX.textContent = "✕"; chipX.title = "Remove picture";
+
+    thumb.append(img, acts, chipGen, chipRep, chipX);
 
     const setURL = (url) => {
         // URLs are owned by PREVIEW_CACHE (shared across renders) — do NOT revoke
@@ -1050,21 +1106,45 @@ function buildThumb(node, row) {
     thumb._lbRefresh = refresh;
     refresh();
 
+    const needLora = () => {
+        if (!row.name || row.name === "None") { showToast("Pick a LoRA first", null, null, 2200); return true; }
+        return false;
+    };
     const applyFile = async (f) => {
         if (!f || !f.type || !f.type.startsWith("image/")) return;
         if (f.size > 8 * 1024 * 1024) { alert("Image too large (max 8 MB)."); return; }
         const ok = await uploadPreview(row.name, f);
         if (ok) { evictPreview(row.name); refresh(); }
     };
-
-    thumb.onclick = (e) => {
-        e.stopPropagation();
-        if (!row.name || row.name === "None") { showToast("Pick a LoRA first", null, null, 2200); return; }
+    const pickFile = () => {
         const inp = document.createElement("input");
         inp.type = "file"; inp.accept = "image/*";
         inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) applyFile(f); };
         inp.click();
     };
+    const doGen = async (btn, busyHTML) => {
+        if (btn.classList.contains("busy")) return;
+        const html = btn.innerHTML;
+        btn.classList.add("busy"); btn.innerHTML = busyHTML;
+        const res = await generatePreview(row.name, "character");
+        btn.classList.remove("busy"); btn.innerHTML = html;
+        if (res && res.ok) { evictPreview(row.name); refresh(); }
+        else alert("Preview generation failed: " + ((res && res.error) || "unknown error"));
+    };
+
+    genBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; doGen(genBtn, '<span class="i">⏳</span><span>…</span>'); };
+    addBtn.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
+    chipGen.onclick = (e) => { e.stopPropagation(); if (needLora()) return; doGen(chipGen, "⏳"); };
+    chipRep.onclick = (e) => { e.stopPropagation(); if (needLora()) return; pickFile(); };
+    chipX.onclick = async (e) => {
+        e.stopPropagation();
+        if (!row.name || row.name === "None") return;
+        closeThumbPop();
+        await deletePreview(row.name);
+        evictPreview(row.name);
+        refresh();
+    };
+
     // drag & drop an image straight onto the thumbnail
     thumb.addEventListener("dragover", (e) => {
         if (!row.name || row.name === "None") return;
@@ -1080,14 +1160,6 @@ function buildThumb(node, row) {
         const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         if (f) applyFile(f);
     });
-    x.onclick = async (e) => {
-        e.stopPropagation();
-        if (!row.name || row.name === "None") return;
-        closeThumbPop();
-        await deletePreview(row.name);
-        evictPreview(row.name);
-        refresh();
-    };
     thumb.onmouseenter = () => { if (thumb._url) openThumbPop(thumb, thumb._url); };
     thumb.onmouseleave = () => closeThumbPop();
     stop(thumb);
