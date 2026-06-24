@@ -2,7 +2,7 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 /*
- * Afloy Lora Box UI — DOM-widget panel.
+ * Timur Lora Box UI — DOM-widget panel.
  *  - Height computed deterministically (no live measurement) except the trigger
  *    editor, whose textarea auto-grows; its measured height feeds back into the
  *    deterministic total so the card expands downward to show all words.
@@ -19,6 +19,99 @@ const TRIG_GAP = 8, TRIG_MIN = 28;
 const SMIN = -3, SMAX = 3;
 const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
 
+/* ---- PROTOTYPE: lora preview as a full-node background ------------------
+ * The title bar is painted by litegraph AFTER onDrawBackground, so a single
+ * background draw can never cover it. Trick: draw the SAME image with the SAME
+ * destination rect [0, -titleH, W, titleH+bodyH] in BOTH callbacks but clip
+ * each to its own region — body slice in onDrawBackground (behind slots/widget),
+ * title slice in onDrawForeground (on top of the title bar). Identical dest rect
+ * ⇒ the seam at y=0 lines up invisibly. */
+const BG_ALPHA = 0.4;                 // image opacity (tweak here)
+const _bgCache = {};                  // lora name -> HTMLImageElement
+function _titleH() { return (typeof LiteGraph !== "undefined" && LiteGraph.NODE_TITLE_HEIGHT) || 30; }
+function bgImageFor(node) {
+    const rows = node._lbRows || [];
+    let name = null;
+    for (const r of rows) { if (r && r.name && r.name !== "None") { name = r.name; break; } }
+    if (!name) return null;
+    let im = _bgCache[name];
+    if (!im) {
+        im = new Image();
+        _bgCache[name] = im;
+        im.onload = () => { im._ok = true; node.setDirtyCanvas(true, true); };
+        im.onerror = () => { im._err = true; };
+        im.src = "/loraboxtimur/preview?file=" + encodeURIComponent(name) + "&bg=1";
+        return null;
+    }
+    return im._ok ? im : null;
+}
+function drawCover(ctx, src, dx, dy, dw, dh) {
+    const iw = src.videoWidth || src.naturalWidth, ih = src.videoHeight || src.naturalHeight;
+    if (!iw || !ih) return;
+    const s = Math.max(dw / iw, dh / ih);   // cover: fill dest, crop overflow
+    const cw = dw / s, ch = dh / s;
+    ctx.drawImage(src, (iw - cw) / 2, (ih - ch) / 2, cw, ch, dx, dy, dw, dh);
+}
+
+/* PROTOTYPE: looping video background. One shared, muted, looping <video>;
+ * a per-frame pump marks the canvas dirty so litegraph redraws it. Uses
+ * requestVideoFrameCallback when available (fires once per decoded frame, so
+ * we don't spin the rAF faster than the video). */
+let VIDEO = null;
+function ensureVideo() {
+    if (VIDEO) return VIDEO;
+    const v = document.createElement("video");
+    v.src = new URL("./katosik_loop.mp4", import.meta.url).href;
+    v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+    v.play().catch(() => {});
+    VIDEO = v;
+    const pump = () => {
+        if (app.canvas) app.canvas.setDirty(true, true);   // repaint to show next frame
+        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(pump);
+        else requestAnimationFrame(pump);
+    };
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(pump);
+    else requestAnimationFrame(pump);
+    return v;
+}
+function bgSource(node) {
+    const v = ensureVideo();
+    if (v && v.readyState >= 2 && v.videoWidth) return v;   // animated loop once ready
+    return bgImageFor(node);                                 // static preview until then
+}
+const BG_BASE = "#1b1b1b";            // uniform base painted under the image
+function drawBgSlice(node, ctx, region) {
+    if (node.flags && node.flags.collapsed) return;
+    const src = bgSource(node);
+    if (!src) return;
+    const W = node.size[0], bodyH = node.size[1], tH = _titleH(), totalH = tH + bodyH;
+    ctx.save();
+    ctx.beginPath();
+    if (region === "title") ctx.rect(0, -tH, W, tH);   // title-bar strip
+    else ctx.rect(0, 0, W, bodyH);                      // body
+    ctx.clip();
+    // Paint our own opaque neutral base FIRST so the node's default body/title
+    // colours can't bleed through the semi-transparent image — guarantees an
+    // even tone regardless of how the frontend renders node backgrounds.
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = BG_BASE;
+    ctx.fillRect(0, -tH, W, totalH);
+    ctx.globalAlpha = BG_ALPHA;
+    drawCover(ctx, src, 0, -tH, W, totalH);            // SAME dest rect in both
+    ctx.restore();
+    // The opaque base covers the title text in the title strip — redraw it.
+    if (region === "title" && node.title) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#e8e8e8";
+        ctx.font = "14px Arial";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(node.title, 18, -tH / 2);
+        ctx.restore();
+    }
+}
+
 let LORA_LIST = null;
 let LORA_LIST_PROMISE = null;
 let LORA_CATEGORIES = null;
@@ -29,7 +122,7 @@ async function getLoraCategories() {
     if (!LORA_CAT_PROMISE) {
         LORA_CAT_PROMISE = (async () => {
             try {
-                const r = await api.fetchApi("/lorabox/categories");
+                const r = await api.fetchApi("/loraboxtimur/categories");
                 if (r.ok) {
                     const j = await r.json();
                     return j.categories || {};
@@ -63,7 +156,7 @@ async function getLoraList() {
 
 async function fetchAuto(name) {
     try {
-        const r = await api.fetchApi("/lorabox/triggers?file=" + encodeURIComponent(name || ""));
+        const r = await api.fetchApi("/loraboxtimur/triggers?file=" + encodeURIComponent(name || ""));
         const j = await r.json();
         return j.words || [];
     } catch (e) { return []; }
@@ -74,7 +167,7 @@ async function fetchAuto(name) {
 async function loadPreviewURL(name) {
     if (!name || name === "None") return null;
     try {
-        const r = await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name) + "&t=" + Date.now());
+        const r = await api.fetchApi("/loraboxtimur/preview?file=" + encodeURIComponent(name) + "&t=" + Date.now());
         if (!r.ok) return null;
         const b = await r.blob();
         if (!b || !b.size) return null;
@@ -85,13 +178,13 @@ async function loadPreviewURL(name) {
 async function uploadPreview(name, file) {
     const ext = (file.name.split(".").pop() || "png").toLowerCase();
     const r = await api.fetchApi(
-        "/lorabox/preview?file=" + encodeURIComponent(name) + "&ext=" + encodeURIComponent(ext),
+        "/loraboxtimur/preview?file=" + encodeURIComponent(name) + "&ext=" + encodeURIComponent(ext),
         { method: "POST", body: file });
     return r.ok;
 }
 
 async function deletePreview(name) {
-    try { await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name), { method: "DELETE" }); }
+    try { await api.fetchApi("/loraboxtimur/preview?file=" + encodeURIComponent(name), { method: "DELETE" }); }
     catch (e) {}
 }
 
@@ -123,10 +216,10 @@ function openThumbPop(anchorEl, url) {
 }
 
 function injectStyle() {
-    const old = document.getElementById("lorabox-style");
+    const old = document.getElementById("loraboxtimur-style");
     if (old) old.remove();
     const s = document.createElement("style");
-    s.id = "lorabox-style";
+    s.id = "loraboxtimur-style";
     s.textContent = `
 .lorabox-root{width:100%; height:100%; overflow:hidden; box-sizing:border-box;}
 .lorabox{width:100%; display:flex; flex-direction:column;
@@ -273,10 +366,51 @@ function injectStyle() {
 .lb-pop-item:hover,.lb-pop-item.hi{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
 .lb-pop-item.sel{outline:1px solid var(--border-color,#666);}
 .lb-pop-empty{padding:8px; color:var(--descrip-text,#888); font-size:11px; font-style:italic;}
+.lb-pop-bar{display:flex; align-items:center; gap:7px; padding:2px 6px 5px; font-size:11px; color:var(--descrip-text,#9a9a9a); cursor:pointer; user-select:none;}
+.lb-pop-bar input{cursor:pointer; margin:0; accent-color:var(--p-button-primary-background,#3b82f6);}
+.lb-pop-bar b{color:var(--input-text,#ddd); font-weight:600;}
+.lb-pop-item.dim{opacity:.38;}
 .lb-thumb-pop{position:fixed; z-index:10020; padding:4px; border-radius:10px; pointer-events:none;
   background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
   box-shadow:0 12px 36px rgba(0,0,0,.6);}
 .lb-thumb-pop img{display:block; max-width:280px; max-height:280px; border-radius:6px;}
+
+/* ===== G row (numeric hero + box-meter + cover) ===== */
+.lorabox .lbg-row{display:flex; align-items:stretch; gap:12px; padding-left:14px; position:relative; overflow:hidden;
+  border:1px solid rgba(255,255,255,.12); border-radius:4px; cursor:ew-resize; transition:opacity .15s;
+  background:linear-gradient(90deg, rgba(242,169,59,.30) 0, rgba(242,169,59,.22) var(--p,60%), rgba(255,255,255,.05) var(--p,60%));}
+.lorabox .lbg-row.off{opacity:.45;}
+.lorabox .lbg-num{display:flex; flex-direction:column; justify-content:center; padding:12px 0; cursor:ns-resize; user-select:none; flex:0 0 auto;}
+.lorabox .lbg-val{display:inline-flex; align-items:baseline; font-family:ui-monospace,"JetBrains Mono",Menlo,monospace; font-weight:700; font-size:28px; letter-spacing:-.02em; color:#FBE3B0; line-height:1;}
+.lorabox .lbg-sign{display:inline-block; width:1ch; text-align:center; flex:0 0 auto;}
+.lorabox .lbg-digits{font-variant-numeric:tabular-nums;}
+.lorabox .lbg-slab{font-family:ui-monospace,monospace; font-weight:500; font-size:8px; letter-spacing:.14em; color:#E8C98A; margin-top:3px;}
+.lorabox .lbg-body{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:6px; padding:12px 0;}
+.lorabox .lbg-l1{display:flex; align-items:center; gap:8px; min-width:0;}
+.lorabox .lbg-en{width:15px; height:15px; margin:0; cursor:pointer; accent-color:#F2A93B; flex:0 0 auto;}
+.lorabox .lbg-name{flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:6px; cursor:pointer;}
+.lorabox .lbg-nametxt{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500; color:#EFEAE2;}
+.lorabox .lbg-nametxt.none{color:#A89E8C;}
+.lorabox .lbg-car{flex:0 0 auto; color:#8a8270; font-size:9px;}
+.lorabox .lbg-ic{flex:0 0 auto; background:none; border:none; color:#A89E8C; font-size:12px; line-height:1; cursor:pointer; padding:2px;}
+.lorabox .lbg-ic:hover{color:#fff;}
+.lorabox .lbg-ic.on{color:#F2A93B;}
+.lorabox .lbg-clip{display:flex; align-items:center; gap:6px;}
+.lorabox .lbg-cliplbl{font-size:10px; color:#A89E8C; flex:0 0 auto;}
+.lorabox .lbg-clip .lb-num{height:22px; width:54px; flex:0 0 auto;}
+.lorabox .lbg-row .lb-thumb{width:58px; height:auto; align-self:stretch; border-radius:0; flex:0 0 auto; border:none;}
+.lorabox .lbg-row .lb-thumb img{width:100%; height:100%; object-fit:cover;}
+/* trigger drawer (full-width, below the row) */
+.lorabox .lb-trig{display:flex; align-items:flex-start; gap:8px; padding:9px 12px 11px 14px;
+  background:rgba(0,0,0,.22); border:1px solid rgba(255,255,255,.12); border-top:none; border-radius:0 0 4px 4px;}
+.lorabox .lb-trig::before{content:""; width:2px; align-self:stretch; min-height:14px; background:#F2A93B; flex:0 0 auto;}
+.lorabox .lb-trig .lb-trig-in{flex:1 1 auto; min-width:0; min-height:28px; padding:0; background:none; border:none; resize:none; overflow:hidden;
+  color:#EAD9B6; font-family:ui-monospace,monospace; font-size:11px; line-height:1.5; outline:none;}
+/* minimalist Add */
+.lorabox .lb-add{height:auto; margin-top:2px; padding:12px 0 4px; gap:6px; background:none; border:none;
+  border-top:1px solid rgba(255,255,255,.08); border-radius:0; color:#A89E8C; font-weight:500; font-size:11px; letter-spacing:.04em; backdrop-filter:none;}
+.lorabox .lb-add:hover{background:none; color:#F2A93B; border-color:rgba(255,255,255,.08);}
+.lorabox .lb-add .plus{font-size:12px; font-weight:500; opacity:1;}
 `;
     document.head.appendChild(s);
 }
@@ -370,6 +504,53 @@ function closePop() {
     p.remove();
 }
 
+/* ---- best-effort: which base model is wired into the MODEL input? --------
+ * No architecture flows on a MODEL link, so we trace upstream to the loader and
+ * guess from its model filename / node name. Returns a label matching
+ * LORA_GROUP_ORDER (Z-Image / Flux / Krea / LTX Video) or null when unsure — in
+ * which case the picker just behaves normally (we never hide on a guess). */
+function archFromName(s) {
+    const low = (s || "").toLowerCase().replace(/\\/g, "/");
+    if (/zimage|z-image|z_image/.test(low)) return "Z-Image";
+    if (/ltx/.test(low)) return "LTX Video";
+    if (/flux/.test(low)) return "Flux";
+    if (/krea/.test(low)) return "Krea";
+    return null;
+}
+function archFromNode(n) {
+    if (!n) return null;
+    let a = archFromName(n.type) || archFromName(n.title);
+    if (a) return a;
+    for (const w of (n.widgets || [])) {
+        if (typeof w.value === "string") { a = archFromName(w.value); if (a) return a; }
+    }
+    return null;
+}
+function getLinkById(graph, id) {
+    if (id == null || !graph || !graph.links) return null;
+    return graph.links.get ? graph.links.get(id) : graph.links[id];
+}
+function traceModelArch(n, depth) {
+    if (!n || !n.graph || depth > 16) return null;
+    // follow a MODEL input upstream first (passthroughs: sampling, patches, lora stacks, our own node)
+    const mi = (n.inputs || []).find((i) => i.type === "MODEL" && i.link != null);
+    if (mi) {
+        const link = getLinkById(n.graph, mi.link);
+        const up = link && traceModelArch(n.graph.getNodeById(link.origin_id), depth + 1);
+        if (up) return up;
+    }
+    // reroute / generic passthrough
+    if (/reroute/i.test(n.type || "") && (n.inputs || [])[0] && n.inputs[0].link != null) {
+        const link = getLinkById(n.graph, n.inputs[0].link);
+        const up = link && traceModelArch(n.graph.getNodeById(link.origin_id), depth + 1);
+        if (up) return up;
+    }
+    return archFromNode(n);   // treat as the source loader
+}
+function detectModelArch(node) {
+    try { return traceModelArch(node, 0); } catch (e) { return null; }
+}
+
 async function openPicker(node, row, fieldEl) {
     if (CUR_POP && CUR_POP._anchor === fieldEl) { closePop(); return; }
     closePop();
@@ -394,7 +575,27 @@ async function openPicker(node, row, fieldEl) {
     CUR_POP = pop;
     fieldEl.classList.add("open");
 
-    const all = LORA_LIST || [];
+    // Foolproofing: hide loras already chosen in OTHER rows so the same lora
+    // can't be added twice. Keep this row's own current pick and "None".
+    const used = new Set((node._lbRows || [])
+        .filter((r) => r !== row && r.name && r.name !== "None")
+        .map((r) => r.name));
+    const all = (LORA_LIST || []).filter((n) => n === "None" || n === row.name || !used.has(n));
+
+    // Compatibility hint: detect the wired model's architecture (best-effort).
+    const modelArch = detectModelArch(node);
+    let onlyCompat = false;
+    if (modelArch) {
+        const bar = document.createElement("label");
+        bar.className = "lb-pop-bar";
+        const cb = document.createElement("input"); cb.type = "checkbox";
+        const txt = document.createElement("span");
+        txt.innerHTML = "model: <b>" + modelArch + "</b> · only compatible";
+        cb.onchange = () => { onlyCompat = cb.checked; draw(search.value); };
+        stop(cb);
+        bar.append(cb, txt);
+        listEl.before(bar);
+    }
     let hi = 0;
     const setHi = (items) => {
         items.forEach((x) => x.classList.remove("hi"));
@@ -406,7 +607,12 @@ async function openPicker(node, row, fieldEl) {
     const draw = (flt) => {
         listEl.innerHTML = "";
         hi = 0;
-        const groups = groupedLoraList(all, flt);
+        let groups = groupedLoraList(all, flt);
+        if (modelArch) {
+            // matching architecture first; "only compatible" hides the rest (keeps None)
+            if (onlyCompat) groups = groups.filter((g) => g.label === modelArch || g.label === null);
+            else groups = groups.slice().sort((a, b) => (a.label === modelArch ? 0 : 1) - (b.label === modelArch ? 0 : 1));
+        }
         const flat = groups.flatMap((g) => g.items);
         if (!flat.length) {
             const e = document.createElement("div");
@@ -419,16 +625,17 @@ async function openPicker(node, row, fieldEl) {
             if (grp.label) {
                 const hdr = document.createElement("div");
                 hdr.className = "lb-pop-group";
-                hdr.textContent = grp.label;
+                hdr.textContent = grp.label === modelArch ? grp.label + "  ✓ matches model" : grp.label;
                 listEl.appendChild(hdr);
             }
             for (const n of grp.items) {
+                const incompat = modelArch && grp.label && grp.label !== modelArch && n !== "None";
                 const it = document.createElement("button");
                 it.type = "button";
-                it.className = "lb-pop-item" + (n === row.name ? " sel" : "");
+                it.className = "lb-pop-item" + (n === row.name ? " sel" : "") + (incompat ? " dim" : "");
                 it.dataset.value = n;
                 it.textContent = n === "None" ? "— None —" : n;
-                it.title = n;
+                it.title = incompat ? n + "  (different architecture than your model)" : n;
                 it.onmousedown = (e) => { e.preventDefault(); pick(n); };
                 listEl.appendChild(it);
             }
@@ -465,9 +672,9 @@ async function openPicker(node, row, fieldEl) {
 }
 
 app.registerExtension({
-    name: "LoraBox.dom",
+    name: "LoraBoxTimur.dom",
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "LoraBox") return;
+        if (nodeData.name !== "LoraBoxTimur") return;
         injectStyle();
         installTouchGuard();
 
@@ -475,6 +682,12 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             onCreated && onCreated.apply(this, arguments);
             const node = this;
+
+            // Uniform base under the bg-image prototype: force title + body to the
+            // same neutral dark so the semi-transparent image tints evenly instead
+            // of bleeding the node's default green body / different title colour.
+            node.bgcolor = "#1b1b1b";   // body fill
+            node.color = "#1b1b1b";     // title-bar fill
 
             const dataW = (node.widgets || []).find((w) => w.name === "data");
             node._lbDataW = dataW;
@@ -505,32 +718,9 @@ app.registerExtension({
             node._lbSepCb = mkCheck(head, "model + clip", (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
             inner.appendChild(head);
 
-            // Second header line: where to inject the LoRA trigger words into a
-            // connected prompt, and the separator used. Stored in `data` (pos /
-            // delim) so it round-trips with the workflow like everything else.
-            const head2 = document.createElement("div");
-            head2.className = "lb-head2";
-            head2.title = "How LoRA trigger words merge into a connected prompt";
-            const h2lbl = document.createElement("span");
-            h2lbl.className = "lb-h2lbl"; h2lbl.textContent = "triggers:";
-            const sel = document.createElement("select");
-            [["end", "at end of prompt"], ["beginning", "at start of prompt"]].forEach(([v, t]) => {
-                const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
-            });
-            sel.value = node._lbPos || "end";
-            sel.onchange = () => { node._lbPos = sel.value; serialize(node); };
-            stop(sel); eatWheel(sel);
-            node._lbPosSel = sel;
-            const dlbl = document.createElement("span");
-            dlbl.className = "lb-h2lbl"; dlbl.textContent = "sep";
-            const delim = document.createElement("input");
-            delim.className = "lb-delim"; delim.value = node._lbDelim != null ? node._lbDelim : ", ";
-            delim.title = "delimiter between prompt and trigger words";
-            delim.onchange = () => { node._lbDelim = delim.value; serialize(node); };
-            stop(delim); eatWheel(delim);
-            node._lbDelimIn = delim;
-            head2.append(h2lbl, sel, dlbl, delim);
-            inner.appendChild(head2);
+            // Trigger-position dropdown removed from the header — position stays
+            // fixed ("end") in node._lbPos; the companion node handles repositioning.
+            // (delimiter likewise fixed at ", " in node._lbDelim)
 
             const list = document.createElement("div");
             list.className = "lb-list";
@@ -591,9 +781,17 @@ app.registerExtension({
         // a width change, so we keep it matched to the node every drawn frame
         // (cheap; only assigns when the value actually changes).
         const onDrawForeground = nodeType.prototype.onDrawForeground;
-        nodeType.prototype.onDrawForeground = function () {
+        nodeType.prototype.onDrawForeground = function (ctx) {
             onDrawForeground && onDrawForeground.apply(this, arguments);
             fitRootWidth(this);
+            drawBgSlice(this, ctx, "title");   // title-bar slice, over the title
+        };
+
+        // Body slice of the same image, drawn behind slots and the DOM panel.
+        const onDrawBackground = nodeType.prototype.onDrawBackground;
+        nodeType.prototype.onDrawBackground = function (ctx) {
+            onDrawBackground && onDrawBackground.apply(this, arguments);
+            drawBgSlice(this, ctx, "body");
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -623,8 +821,8 @@ function mkCheck(parent, label, onChange) {
 }
 
 function applyMute(node) {
-    const els = node._lbList ? node._lbList.querySelectorAll(".lb-card") : [];
-    els.forEach((el, i) => { const row = node._lbRows[i]; if (row) el.classList.toggle("lb-off", rowOff(node, row)); });
+    const els = node._lbList ? node._lbList.querySelectorAll(".lbg-row") : [];
+    els.forEach((el, i) => { const row = node._lbRows[i]; if (row) el.classList.toggle("off", rowOff(node, row)); });
 }
 
 function markDuplicates(node) {
@@ -725,7 +923,6 @@ function initFromData(node) {
     // left LoRAs silently un-applied with an empty checkbox — nothing to undo).
     if (node._lbMuteCb) node._lbMuteCb.checked = node._lbMute;
     if (node._lbPosSel) node._lbPosSel.value = node._lbPos;
-    if (node._lbDelimIn) node._lbDelimIn.value = node._lbDelim;
     renderRows(node); sizeNode(node); serialize(node);
 }
 
@@ -770,80 +967,92 @@ function renderRows(node) {
         return;
     }
 
+    const fillPct = (v) => (Math.max(0, Math.min(1, v / 1.5)) * 100) + "%";
+
     node._lbRows.forEach((row, i) => {
         const card = document.createElement("div");
-        card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "");
+        card.className = "lbg-row" + (rowOff(node, row) ? " off" : "");
+        card.style.setProperty("--p", fillPct(row.sm));
 
-        const l1 = document.createElement("div");
-        l1.className = "lb-l1";
-
-        const handle = document.createElement("div");
-        handle.className = "lb-drag"; handle.textContent = "⠿"; handle.title = "drag to reorder";
-        attachReorder(node, card, handle, i);
-
-        const en = document.createElement("input");
-        en.type = "checkbox"; en.className = "lb-en"; en.checked = !!row.on; en.title = "enable / disable";
-        en.onchange = () => { row.on = en.checked; card.classList.toggle("lb-off", rowOff(node, row)); serialize(node); };
-        stop(en);
-
-        const field = document.createElement("div");
-        field.className = "lb-name"; field.title = row.name || "None"; field.tabIndex = 0;
-        const txt = document.createElement("span");
-        txt.className = "txt" + (!row.name || row.name === "None" ? " none" : "");
-        txt.textContent = row.name && row.name !== "None" ? row.name : "None";
-        const car = document.createElement("span"); car.className = "car"; car.textContent = "▼";
-        field.append(txt, car);
-        field.onclick = (e) => {
-            e.stopPropagation();
-            openPicker(node, row, field);
+        // big strength number (scrubby) with a reserved left slot for the minus
+        const num = document.createElement("div");
+        num.className = "lbg-num"; num.title = "drag ↕ to fine-tune · double-click to type";
+        const sign = document.createElement("span"); sign.className = "lbg-sign";
+        const digits = document.createElement("span"); digits.className = "lbg-digits";
+        const valWrap = document.createElement("span"); valWrap.className = "lbg-val"; valWrap.append(sign, digits);
+        const slab = document.createElement("span"); slab.className = "lbg-slab"; slab.textContent = "STRENGTH";
+        num.append(valWrap, slab);
+        const renderVal = (v) => { sign.textContent = v < 0 ? "−" : ""; digits.textContent = Math.abs(v).toFixed(2); };
+        const setV = (v) => {
+            row.sm = clampS(Math.round(v / 0.05) * 0.05);
+            if (!node._lbSep) row.sc = row.sm;
+            renderVal(row.sm); card.style.setProperty("--p", fillPct(row.sm)); serialize(node);
         };
+        renderVal(row.sm);
+
+        // body: enable + name + ⓘ + ✕  (+ compact clip when model+clip)
+        const body = document.createElement("div"); body.className = "lbg-body";
+        const l1 = document.createElement("div"); l1.className = "lbg-l1";
+        const en = document.createElement("input");
+        en.type = "checkbox"; en.className = "lbg-en"; en.checked = !!row.on; en.title = "enable / disable";
+        en.onchange = () => { row.on = en.checked; card.classList.toggle("off", rowOff(node, row)); serialize(node); };
+        stop(en);
+        const field = document.createElement("div"); field.className = "lbg-name"; field.title = row.name || "None"; field.tabIndex = 0;
+        const txt = document.createElement("span");
+        txt.className = "lbg-nametxt" + (!row.name || row.name === "None" ? " none" : "");
+        txt.textContent = row.name && row.name !== "None" ? row.name : "None";
+        const car = document.createElement("span"); car.className = "lbg-car"; car.textContent = "▼";
+        field.append(txt, car);
+        field.onclick = (e) => { e.stopPropagation(); openPicker(node, row, field); };
         stop(field);
-
-        const trig = document.createElement("button");
-        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.textContent = "ⓘ"; trig.title = "trigger words";
-        trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
-        stop(trig);
-
+        const info = document.createElement("button");
+        info.className = "lbg-ic" + (row._open ? " on" : ""); info.textContent = "ⓘ"; info.title = "trigger words";
+        info.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
+        stop(info);
         const del = document.createElement("button");
-        del.className = "lb-ico lb-del"; del.textContent = "✕"; del.title = "remove lora";
+        del.className = "lbg-ic"; del.textContent = "✕"; del.title = "remove lora";
         del.onclick = (e) => { e.stopPropagation(); node._lbRows.splice(i, 1); renderRows(node); sizeNode(node); serialize(node); };
         stop(del);
-
-        l1.append(handle, en, field, trig, del);
-
-        const l2 = document.createElement("div");
-        l2.className = "lb-l2" + (node._lbSep ? " sep" : "");
-
-        const slider = document.createElement("input");
-        slider.className = "lb-slider"; slider.type = "range";
-        slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(row.sm); slider.title = "strength";
-        const num = mkNum(row.sm, node._lbSep ? "model strength" : "strength",
-            (v) => { row.sm = v; slider.value = String(v); serialize(node); });
-        slider.oninput = () => { row.sm = clampS(parseFloat(slider.value)); num.value = round2(row.sm); tintNum(num, row.sm); serialize(node); };
-        stop(slider); eatWheel(slider);
-
-        l2.append(slider, num);
+        l1.append(en, field, info, del);
+        body.append(l1);
         if (node._lbSep) {
-            const tag = document.createElement("span"); tag.className = "lb-tag"; tag.textContent = "clip";
+            const cl = document.createElement("div"); cl.className = "lbg-clip";
+            const lbl = document.createElement("span"); lbl.className = "lbg-cliplbl"; lbl.textContent = "clip";
             const cnum = mkNum(row.sc != null ? row.sc : row.sm, "clip strength", (v) => { row.sc = v; serialize(node); });
-            l2.append(tag, cnum);
+            cl.append(lbl, cnum); body.append(cl);
         }
 
-        const content = document.createElement("div");
-        content.className = "lb-content";
-        content.append(l1, l2);
+        const cover = buildThumb(node, row);   // reused; CSS makes it a full-height cover
 
-        const main = document.createElement("div");
-        main.className = "lb-main";
-        main.append(buildThumb(node, row), content);
+        card.append(num, body, cover);
 
-        card.append(main);
-        if (row._open) card.append(buildTrigEditor(node, row));
+        // drag horizontally on the box (meter) -> strength; controls are excluded
+        card.addEventListener("pointerdown", (e) => {
+            if (e.target.closest(".lbg-en,.lbg-name,.lbg-ic,.lbg-num,.lb-thumb,.lbg-clip")) return;
+            const rect = card.getBoundingClientRect();
+            const mv = (ev) => setV(((ev.clientX - rect.left) / rect.width) * 1.5);
+            mv(e); try { card.setPointerCapture(e.pointerId); } catch (_) {}
+            const up = () => { card.removeEventListener("pointermove", mv); card.removeEventListener("pointerup", up); };
+            card.addEventListener("pointermove", mv); card.addEventListener("pointerup", up);
+        });
+        // scrubby number -> fine tune (relative drag); double-click -> type
+        num.addEventListener("pointerdown", (e) => {
+            e.stopPropagation();
+            const lastX = e.clientX, base = row.sm;
+            try { num.setPointerCapture(e.pointerId); } catch (_) {}
+            const mv = (ev) => setV(base + (ev.clientX - lastX) * 0.004);
+            const up = () => { num.removeEventListener("pointermove", mv); num.removeEventListener("pointerup", up); };
+            num.addEventListener("pointermove", mv); num.addEventListener("pointerup", up);
+        });
+        num.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            const t = prompt("LoRA strength (-3…3):", row.sm.toFixed(2));
+            if (t != null && !isNaN(parseFloat(t))) setV(parseFloat(t));
+        });
 
         list.appendChild(card);
+        if (row._open) list.appendChild(buildTrigEditor(node, row));   // full-width drawer below
     });
-
-    markDuplicates(node);
 }
 
 /* per-row thumbnail: shows the lora's sidecar image (shared across workflows),
@@ -950,10 +1159,21 @@ function buildTrigEditor(node, row) {
 /* deterministic height; open trigger editors contribute their grown height */
 function sizeNode(node) {
     const rows = node._lbRows;
-    let listH;
-    if (rows.length === 0) listH = 40;
-    else listH = rows.reduce((a, r) => a + CARD_BASE + (r._open ? TRIG_GAP + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
-    node._lbContentH = ROOT_PAD + INNER_GAP + HEAD_H + HEAD2_H + listH + ADD_H + BUFFER;
+    // Measure the ACTUAL rendered height of the panel (robust — matches the
+    // browser exactly). Fall back to a pixel estimate only before first layout.
+    let h = 0;
+    if (node._lbInner) h = Math.ceil(node._lbInner.scrollHeight);
+    if (!h || h < 60) {
+        const ROW = 62, CLIP = 26, DRAWER_PAD = 22;
+        const openCount = rows.filter((r) => r._open).length;
+        const listH = rows.length === 0 ? 40
+            : rows.reduce((a, r) => a + ROW + (node._lbSep ? CLIP : 0) + (r._open ? DRAWER_PAD + (r._trigH || TRIG_MIN) : 0), 0)
+              + (rows.length + openCount - 1) * GAP;
+        h = ROOT_PAD + INNER_GAP + HEAD_H + listH + ADD_H + BUFFER;
+    } else {
+        h += BUFFER;
+    }
+    node._lbContentH = h;
     // Only the HEIGHT is ours to manage; width is whatever the user set. We
     // preserve the current width and let computeSize derive the new height from
     // our getMinHeight/getMaxHeight. This never changes width, so value changes

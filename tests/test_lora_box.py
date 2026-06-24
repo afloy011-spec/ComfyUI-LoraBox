@@ -1,4 +1,4 @@
-"""Unit tests for LoraBox backend.
+"""Unit tests for LoraBoxTimur backend.
 
 ComfyUI is not importable in CI, so we stub `folder_paths` and `comfy.*` in
 sys.modules before importing the node. The stubs record what gets applied so we
@@ -59,7 +59,7 @@ def _make_safetensors(path, metadata):
         f.write(b"\x00\x00")
 
 
-class LoraBoxTest(unittest.TestCase):
+class LoraBoxTimurTest(unittest.TestCase):
     def setUp(self):
         _APPLIED.clear()
         _LORAS.clear()
@@ -68,7 +68,7 @@ class LoraBoxTest(unittest.TestCase):
         self.a = os.path.join(self.tmp, "a.safetensors")
         _make_safetensors(self.a, {"trigger_phrase": "alpha, beta"})
         _LORAS["a.safetensors"] = self.a
-        self.node = lora_box.LoraBox()
+        self.node = lora_box.LoraBoxTimur()
 
     def _apply(self, rows, mute=False, prompt=None, pos="end", delim=", "):
         data = json.dumps({"v": 1, "mute": mute, "pos": pos, "delim": delim, "rows": rows})
@@ -178,19 +178,19 @@ class LoraBoxTest(unittest.TestCase):
     def test_is_changed_tracks_data(self):
         d1 = json.dumps({"rows": [{"name": "a.safetensors", "sm": 1.0}]})
         d2 = json.dumps({"rows": [{"name": "a.safetensors", "sm": 0.5}]})
-        self.assertNotEqual(lora_box.LoraBox.IS_CHANGED([], [], data=d1),
-                            lora_box.LoraBox.IS_CHANGED([], [], data=d2))
+        self.assertNotEqual(lora_box.LoraBoxTimur.IS_CHANGED([], [], data=d1),
+                            lora_box.LoraBoxTimur.IS_CHANGED([], [], data=d2))
 
     def test_is_changed_tracks_prompt(self):
         d = json.dumps({"rows": [{"name": "a.safetensors", "sm": 1.0}]})
-        self.assertNotEqual(lora_box.LoraBox.IS_CHANGED([], [], prompt="x", data=d),
-                            lora_box.LoraBox.IS_CHANGED([], [], prompt="y", data=d))
+        self.assertNotEqual(lora_box.LoraBoxTimur.IS_CHANGED([], [], prompt="x", data=d),
+                            lora_box.LoraBoxTimur.IS_CHANGED([], [], prompt="y", data=d))
 
     def test_is_changed_tracks_file_mtime(self):
         d = json.dumps({"rows": [{"name": "a.safetensors", "sm": 1.0}]})
-        h1 = lora_box.LoraBox.IS_CHANGED([], [], data=d)
+        h1 = lora_box.LoraBoxTimur.IS_CHANGED([], [], data=d)
         os.utime(self.a, (0, 0))  # change mtime
-        h2 = lora_box.LoraBox.IS_CHANGED([], [], data=d)
+        h2 = lora_box.LoraBoxTimur.IS_CHANGED([], [], data=d)
         self.assertNotEqual(h1, h2)
 
     # --- category grouping ---------------------------------------------------
@@ -213,7 +213,7 @@ class LoraBoxTest(unittest.TestCase):
 
 class PromptMergeTest(unittest.TestCase):
     def setUp(self):
-        self.node = lora_box.LoraBoxPromptMerge()
+        self.node = lora_box.LoraBoxTimurPromptMerge()
         self.END = lora_box.POS_END
         self.BEGIN = lora_box.POS_BEGIN
 

@@ -19,13 +19,16 @@ import math
 import struct
 import hashlib
 import logging
+import asyncio
+import urllib.request
+import urllib.parse
 from collections import OrderedDict
 
 import folder_paths
 import comfy.sd
 import comfy.utils
 
-log = logging.getLogger("LoraBox")
+log = logging.getLogger("LoraBoxTimurTimur")
 
 MAX_HEADER_BYTES = 32 * 1024 * 1024   # cap safetensors header read (anti-DoS)
 LORA_CACHE_MAX = 4                    # how many loaded LoRAs to keep in RAM
@@ -225,17 +228,81 @@ def _find_preview(name):
     return None
 
 
+# ---- auto-fetch a preview from Civitai when the lora has no local sidecar ----
+# So "every lora shows a picture": if there is no <basename>.<ext> next to the
+# file, look the lora up on Civitai by its SHA256 and cache the first preview
+# image AS a sidecar (so it's instant forever after). Best-effort: any failure
+# (offline / not on civitai / unknown hash) just returns None -> 404 as before.
+_HASH_CACHE = OrderedDict()   # path -> (mtime, sha256)
+_CIVITAI_MISS = set()         # paths we already failed to resolve, don't retry every request
+
+
+def _sha256(path):
+    mt = _mtime(path)
+    hit = _HASH_CACHE.get(path)
+    if hit and hit[0] == mt:
+        _HASH_CACHE.move_to_end(path)
+        return hit[1]
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    dig = h.hexdigest()
+    _HASH_CACHE[path] = (mt, dig)
+    while len(_HASH_CACHE) > 64:
+        _HASH_CACHE.popitem(last=False)
+    return dig
+
+
+def _http_get(url, timeout):
+    req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-LoraBox"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def _fetch_civitai_preview(name):
+    """No local sidecar -> resolve on Civitai by file hash, save <base>.png. Blocking."""
+    path = _safe_lora_path(name)
+    if not path or path in _CIVITAI_MISS:
+        return None
+    base = os.path.splitext(path)[0]
+    try:
+        sha = _sha256(path)
+        meta = json.loads(_http_get(
+            "https://civitai.com/api/v1/model-versions/by-hash/" + sha, 12).decode("utf-8"))
+        img_url = next((im["url"] for im in (meta.get("images") or []) if im.get("url")), None)
+        if not img_url:
+            _CIVITAI_MISS.add(path)
+            return None
+        blob = _http_get(img_url, 25)
+        if not blob or len(blob) > MAX_PREVIEW_BYTES * 4:
+            _CIVITAI_MISS.add(path)
+            return None
+        ext = os.path.splitext(urllib.parse.urlparse(img_url).path)[1].lower()
+        if ext not in PREVIEW_EXTS:
+            ext = ".png"
+        out = base + ext
+        with open(out, "wb") as f:
+            f.write(blob)
+        log.info("fetched Civitai preview for %s", name)
+        return out
+    except Exception as e:
+        _CIVITAI_MISS.add(path)
+        log.info("Civitai preview fetch failed for %s: %s", name, e)
+        return None
+
+
 # Optional API routes so the UI can show trigger words / preview images.
 try:
     from server import PromptServer
     from aiohttp import web
 
-    @PromptServer.instance.routes.get("/lorabox/triggers")
+    @PromptServer.instance.routes.get("/loraboxtimur/triggers")
     async def _lorabox_triggers(request):
         file = request.query.get("file", "")
         return web.json_response({"file": file, "words": trigger_words_for(file)})
 
-    @PromptServer.instance.routes.get("/lorabox/categories")
+    @PromptServer.instance.routes.get("/loraboxtimur/categories")
     async def _lorabox_categories(request):
         """Map every registered lora to a picker group (name + metadata)."""
         cats = {}
@@ -248,9 +315,14 @@ try:
                 cats[name] = category_for(name)
         return web.json_response({"categories": cats})
 
-    @PromptServer.instance.routes.get("/lorabox/preview")
+    @PromptServer.instance.routes.get("/loraboxtimur/preview")
     async def _lorabox_preview_get(request):
-        p = _find_preview(request.query.get("file", ""))
+        file = request.query.get("file", "")
+        p = _find_preview(file)
+        if not p:
+            # no local sidecar: try to pull one from Civitai (hashing + network
+            # are blocking, so run off the event loop) and cache it as a sidecar
+            p = await asyncio.get_event_loop().run_in_executor(None, _fetch_civitai_preview, file)
         if not p:
             return web.Response(status=404)
         try:
@@ -262,7 +334,7 @@ try:
         return web.Response(body=data, content_type=PREVIEW_CT.get(ext, "application/octet-stream"),
                             headers={"Cache-Control": "no-store"})
 
-    @PromptServer.instance.routes.post("/lorabox/preview")
+    @PromptServer.instance.routes.post("/loraboxtimur/preview")
     async def _lorabox_preview_post(request):
         base = _preview_base(request.query.get("file", ""))
         if not base:
@@ -288,7 +360,7 @@ try:
             return web.json_response({"ok": False, "error": str(ex)}, status=500)
         return web.json_response({"ok": True, "ext": ext})
 
-    @PromptServer.instance.routes.delete("/lorabox/preview")
+    @PromptServer.instance.routes.delete("/loraboxtimur/preview")
     async def _lorabox_preview_del(request):
         base = _preview_base(request.query.get("file", ""))
         if not base:
@@ -302,10 +374,10 @@ try:
                 pass
         return web.json_response({"ok": removed})
 except Exception as e:  # pragma: no cover - server may be unavailable at import
-    log.warning("could not register /lorabox routes: %s", e)
+    log.warning("could not register /loraboxtimur routes: %s", e)
 
 
-class LoraBox:
+class LoraBoxTimur:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -456,7 +528,7 @@ POS_END = "end (append after prompt)"
 POS_BEGIN = "beginning (prepend before prompt)"
 
 
-class LoraBoxPromptMerge:
+class LoraBoxTimurPromptMerge:
     """Merge a prompt with LoRA trigger words, with a working position switch.
 
     Replaces the fragile JoinStrings + JoinStrings + LazySwitchKJ trio: one node
@@ -494,10 +566,10 @@ class LoraBoxPromptMerge:
 
 
 NODE_CLASS_MAPPINGS = {
-    "LoraBox": LoraBox,
-    "LoraBoxPromptMerge": LoraBoxPromptMerge,
+    "LoraBoxTimur": LoraBoxTimur,
+    "LoraBoxTimurPromptMerge": LoraBoxTimurPromptMerge,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LoraBox": "Afloy Lora Box",
-    "LoraBoxPromptMerge": "Prompt + Triggers (Lora Box)",
+    "LoraBoxTimur": "Timur Lora Box",
+    "LoraBoxTimurPromptMerge": "Prompt + Triggers (Timur Lora Box)",
 }

@@ -1,4 +1,4 @@
-# Afloy Lora Box
+# Timur Lora Box
 
 A compact multi-LoRA loader for ComfyUI with a custom DOM (HTML) panel UI.
 
@@ -24,7 +24,7 @@ offering a one-row-per-LoRA design.
 
 ## Node
 
-**Afloy Lora Box** (`LoraBox`, category `loaders`)
+**Timur Lora Box** (`LoraBoxTimur`, category `loaders`)
 
 | Input | Type | Notes |
 |-------|------|-------|
@@ -46,7 +46,7 @@ through untouched.)
 Strengths are clamped to `-3..3` (negative "anti-LoRA" weights allowed);
 non-finite values (NaN/Inf) are rejected.
 
-### Prompt + Triggers (Lora Box) (`LoraBoxPromptMerge`, category `loaders`)
+### Prompt + Triggers (Timur Lora Box) (`LoraBoxTimurPromptMerge`, category `loaders`)
 
 Merges a prompt with LoRA trigger words and exposes a single **position** switch
 to place the triggers at the **beginning** or the **end** of the prompt. Replaces
@@ -55,7 +55,7 @@ the fragile `JoinStrings` + `JoinStrings` + `LazySwitchKJ` combo.
 | Input | Type | Notes |
 |-------|------|-------|
 | `prompt` | STRING (input) | the base prompt |
-| `triggers` | STRING (input) | trigger words (e.g. from Afloy Lora Box) |
+| `triggers` | STRING (input) | trigger words (e.g. from Timur Lora Box) |
 | `position` | combo | `end (append after prompt)` / `beginning (prepend before prompt)` |
 | `delimiter` | STRING | default `", "` |
 
@@ -67,7 +67,7 @@ trigger words already present in the prompt are not duplicated.
 Clone into `ComfyUI/custom_nodes/` and restart ComfyUI:
 
 ```
-ComfyUI/custom_nodes/ComfyUI-LoraBox/
+ComfyUI/custom_nodes/ComfyUI-LoraBox-Timur/
 ├── __init__.py
 ├── lora_box.py
 ├── pyproject.toml
@@ -89,7 +89,7 @@ Tests stub `folder_paths` / `comfy.*`, so they run without a full ComfyUI instal
   mtime, so replacing a `.safetensors` on disk transparently re-reads it.
 - `IS_CHANGED` hashes the row JSON plus the mtime of each referenced LoRA, so
   cached outputs / trigger words never go stale.
-- The `/lorabox/triggers` and `/lorabox/preview` routes only touch files whose
+- The `/loraboxtimur/triggers` and `/loraboxtimur/preview` routes only touch files whose
   name is in the registered loras list (guards against path traversal /
   arbitrary file reads or writes). Preview uploads are capped at 8 MB and limited
   to `png/jpg/jpeg/webp/gif`; the sidecar is `<lora-basename>.<ext>` next to the
