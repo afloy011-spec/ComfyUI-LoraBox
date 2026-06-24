@@ -12,13 +12,34 @@ import { api } from "../../scripts/api.js";
  */
 
 const GAP = 8, MIN_W = 240, FIXED_W = 380;
-const ROOT_PAD = 16, INNER_GAP = 16, HEAD_H = 20, CARD_BASE = 76, ADD_H = 36, BUFFER = 8;
+const ROOT_PAD = 16, INNER_GAP = 16, HEAD_H = 20, HEAD2_H = 28, CARD_BASE = 76, ADD_H = 36, BUFFER = 8;
 const TRIG_GAP = 8, TRIG_MIN = 28;
-const SMIN = 0, SMAX = 2;
+// Allow negative ("anti-LoRA") and >1 weights for parity with rgthree / the
+// core loader. Default still sits at 1.0; clamp keeps it sane.
+const SMIN = -3, SMAX = 3;
 const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
 
 let LORA_LIST = null;
 let LORA_LIST_PROMISE = null;
+let LORA_CATEGORIES = null;
+let LORA_CAT_PROMISE = null;
+
+async function getLoraCategories() {
+    if (LORA_CATEGORIES) return LORA_CATEGORIES;
+    if (!LORA_CAT_PROMISE) {
+        LORA_CAT_PROMISE = (async () => {
+            try {
+                const r = await api.fetchApi("/lorabox/categories");
+                if (r.ok) {
+                    const j = await r.json();
+                    return j.categories || {};
+                }
+            } catch (e) {}
+            return {};
+        })().then((m) => (LORA_CATEGORIES = m || {}));
+    }
+    return LORA_CAT_PROMISE;
+}
 
 async function getLoraList() {
     if (LORA_LIST) return LORA_LIST;
@@ -48,6 +69,77 @@ async function fetchAuto(name) {
     } catch (e) { return []; }
 }
 
+/* ---- per-lora preview images -------------------------------------------- */
+// Fetch the sidecar preview for a lora as an object URL, or null if none.
+async function loadPreviewURL(name) {
+    if (!name || name === "None") return null;
+    try {
+        const r = await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name) + "&t=" + Date.now());
+        if (!r.ok) return null;
+        const b = await r.blob();
+        if (!b || !b.size) return null;
+        return URL.createObjectURL(b);
+    } catch (e) { return null; }
+}
+
+async function uploadPreview(name, file) {
+    const ext = (file.name.split(".").pop() || "png").toLowerCase();
+    const r = await api.fetchApi(
+        "/lorabox/preview?file=" + encodeURIComponent(name) + "&ext=" + encodeURIComponent(ext),
+        { method: "POST", body: file });
+    return r.ok;
+}
+
+async function deletePreview(name) {
+    try { await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name), { method: "DELETE" }); }
+    catch (e) {}
+}
+
+async function generatePreview(name, kind = "character") {
+    if (!name || name === "None") return { ok: false, error: "no lora selected" };
+    const url = "/lorabox/preview/generate?file=" + encodeURIComponent(name)
+        + "&kind=" + encodeURIComponent(kind);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 180000);
+    try {
+        const r = await api.fetchApi(url, { method: "POST", signal: ctrl.signal });
+        const j = await r.json();
+        return j;
+    } catch (e) {
+        if (e && e.name === "AbortError") return { ok: false, error: "timed out (3 min)" };
+        return { ok: false, error: String(e) };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/* floating enlarged preview on hover */
+let THUMB_POP = null;
+function closeThumbPop() { if (THUMB_POP) { THUMB_POP.remove(); THUMB_POP = null; } }
+function openThumbPop(anchorEl, url) {
+    closeThumbPop();
+    if (!url) return;
+    const pop = document.createElement("div");
+    pop.className = "lb-thumb-pop";
+    const img = document.createElement("img");
+    img.src = url;
+    pop.appendChild(img);
+    document.body.appendChild(pop);
+    THUMB_POP = pop;
+    const place = () => {
+        const r = anchorEl.getBoundingClientRect();
+        const pw = pop.offsetWidth, ph = pop.offsetHeight;
+        let left = r.right + 8;
+        if (left + pw > window.innerWidth - 8) left = r.left - pw - 8;
+        if (left < 8) left = 8;
+        let top = r.top + r.height / 2 - ph / 2;
+        top = Math.max(8, Math.min(top, window.innerHeight - ph - 8));
+        pop.style.left = left + "px";
+        pop.style.top = top + "px";
+    };
+    if (img.complete) place(); else img.onload = place;
+}
+
 function injectStyle() {
     const old = document.getElementById("lorabox-style");
     if (old) old.remove();
@@ -63,6 +155,17 @@ function injectStyle() {
   color:var(--descrip-text,#9a9a9a); font-size:11px;}
 .lorabox .lb-head label{display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none;}
 .lorabox .lb-head input{accent-color:var(--p-button-primary-background,#3b82f6); cursor:pointer; margin:0;}
+.lorabox .lb-head2{display:flex; align-items:center; gap:8px; min-height:24px;
+  color:var(--descrip-text,#9a9a9a); font-size:11px;}
+.lorabox .lb-head2 .lb-h2lbl{opacity:.85; user-select:none;}
+.lorabox .lb-head2 select{flex:1 1 auto; min-width:0; height:24px; padding:0 6px; cursor:pointer;
+  background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
+  border:1px solid var(--border-color,#4a4a4a); border-radius:6px; font-size:11px; outline:none;}
+.lorabox .lb-head2 select:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
+.lorabox .lb-head2 input.lb-delim{width:48px; height:24px; text-align:center;
+  background:var(--comfy-menu-bg,#2a2a2a); color:var(--input-text,#eee);
+  border:1px solid var(--border-color,#4a4a4a); border-radius:6px; font-size:11px; outline:none;}
+.lorabox .lb-head2 input.lb-delim:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
 .lorabox .lb-list{display:flex; flex-direction:column; gap:${GAP}px;}
 .lorabox .lb-card{display:flex; flex-direction:column; gap:6px; min-width:0;
   padding:8px 9px; border-radius:9px;
@@ -72,6 +175,31 @@ function injectStyle() {
 .lorabox .lb-card.lb-off{opacity:.42;}
 .lorabox .lb-card.lb-dup{border-color:#b9802f;}
 .lorabox .lb-card.lb-dup .lb-name{border-color:#b9802f;}
+.lorabox .lb-main{display:flex; gap:9px; align-items:stretch; min-width:0;}
+.lorabox .lb-content{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:6px;}
+.lorabox .lb-thumb{flex:0 0 auto; width:54px; height:54px; align-self:center; position:relative;
+  border-radius:8px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  background:var(--comfy-menu-bg,#2a2a2a); border:1px solid var(--border-color,#4a4a4a);
+  transition:border-color .12s;}
+.lorabox .lb-thumb:hover{border-color:var(--p-button-primary-background,#5a7fd0);}
+.lorabox .lb-thumb img{width:100%; height:100%; object-fit:cover; display:none;}
+.lorabox .lb-thumb.has-img img{display:block;}
+.lorabox .lb-thumb .lb-ph{display:flex; flex-direction:column; align-items:center; gap:2px;
+  color:var(--descrip-text,#888); font-size:16px; line-height:1; pointer-events:none;}
+.lorabox .lb-thumb .lb-ph .lb-ph-t{font-size:8px; letter-spacing:.02em; opacity:.85;}
+.lorabox .lb-thumb.has-img .lb-ph{display:none;}
+.lorabox .lb-thumb .lb-thumb-x{position:absolute; top:2px; right:2px; width:16px; height:16px;
+  display:none; align-items:center; justify-content:center; font-size:10px; border-radius:4px;
+  background:rgba(0,0,0,.62); color:#fff; line-height:1;}
+.lorabox .lb-thumb.has-img:hover .lb-thumb-x{display:flex;}
+.lorabox .lb-thumb .lb-thumb-x:hover{background:#7a2b2b;}
+.lorabox .lb-thumb .lb-thumb-gen{position:absolute; bottom:2px; left:2px; width:18px; height:18px;
+  display:flex; align-items:center; justify-content:center; font-size:11px; border-radius:4px;
+  background:rgba(0,0,0,.55); color:#dfe8ff; cursor:pointer; line-height:1;}
+.lorabox .lb-thumb .lb-thumb-gen:hover{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
+.lorabox .lb-thumb .lb-thumb-gen.busy{opacity:.65; pointer-events:none; animation:lb-pulse 1s ease infinite;}
+.lorabox .lb-thumb .lb-thumb-gen.ok{background:#2d6a4f;}
+@keyframes lb-pulse{0%,100%{opacity:.65}50%{opacity:1}}
 .lorabox .lb-l1{display:grid; grid-template-columns:14px 18px 1fr 26px 26px 26px; gap:6px; align-items:center; min-width:0;}
 .lorabox .lb-drag{width:14px; height:26px; display:flex; align-items:center; justify-content:center;
   cursor:grab; color:var(--descrip-text,#777); font-size:12px; line-height:1; user-select:none; flex:0 0 auto;}
@@ -132,19 +260,32 @@ function injectStyle() {
   color:var(--descrip-text,#888); font-style:italic; font-size:11px; opacity:.8;}
 
 .lb-pop{position:fixed; z-index:10010; display:flex; flex-direction:column; gap:6px;
-  padding:6px; max-height:300px; border-radius:8px;
+  padding:6px; max-height:min(380px, calc(100vh - 24px)); overflow:hidden;
+  border-radius:8px;
   background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
-  box-shadow:0 10px 30px rgba(0,0,0,.55); font-family:sans-serif;}
-.lb-pop-search{height:28px; padding:0 9px; font-size:12px; border-radius:6px; outline:none;
+  box-shadow:0 10px 30px rgba(0,0,0,.55); font-family:sans-serif; font-size:12px;
+  line-height:1.4; box-sizing:border-box;}
+.lb-pop-search{flex:0 0 auto; height:28px; padding:0 9px; font-size:12px; border-radius:6px; outline:none;
   background:var(--comfy-input-bg,#1a1a1a); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,#555);}
+  border:1px solid var(--border-color,#555); box-sizing:border-box;}
 .lb-pop-search:focus{border-color:var(--p-button-primary-background,#6a8fe0);}
-.lb-pop-list{overflow:auto; display:flex; flex-direction:column; gap:2px; min-height:0;}
-.lb-pop-item{padding:6px 9px; border-radius:5px; cursor:pointer; font-size:12px;
-  color:var(--input-text,#ddd); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.lb-pop-list{flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto;
+  overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
+.lb-pop-group{position:sticky; top:0; z-index:2; padding:5px 9px 3px; margin:0;
+  font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--descrip-text,#888); background:var(--comfy-menu-bg,#222);
+  border-bottom:1px solid var(--border-color,#444); pointer-events:none; line-height:1.2;}
+.lb-pop-item{display:block; width:100%; margin:0 0 2px; padding:6px 9px; border-radius:5px;
+  cursor:pointer; font-size:12px; line-height:1.35; min-height:27px; box-sizing:border-box;
+  color:var(--input-text,#ddd); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  background:transparent; border:none; text-align:left; font-family:inherit;}
 .lb-pop-item:hover,.lb-pop-item.hi{background:var(--p-button-primary-background,#3b82f6); color:#fff;}
 .lb-pop-item.sel{outline:1px solid var(--border-color,#666);}
 .lb-pop-empty{padding:8px; color:var(--descrip-text,#888); font-size:11px; font-style:italic;}
+.lb-thumb-pop{position:fixed; z-index:10020; padding:4px; border-radius:10px; pointer-events:none;
+  background:var(--comfy-menu-bg,#222); border:1px solid var(--border-color,#555);
+  box-shadow:0 12px 36px rgba(0,0,0,.6);}
+.lb-thumb-pop img{display:block; max-width:280px; max-height:280px; border-radius:6px;}
 `;
     document.head.appendChild(s);
 }
@@ -167,8 +308,63 @@ const stop = (el) => el.addEventListener("pointerdown", (e) => e.stopPropagation
 const eatWheel = (el) => el.addEventListener("wheel", (e) => e.stopPropagation(), { passive: true });
 const rowOff = (node, row) => node._lbMute || !row.on;
 
+/* Stop touch gestures that start inside any Lora Box panel from reaching
+ * litegraph, which would pinch-zoom / pan the whole graph when you press or
+ * drag a slider on a touchscreen / precision touchpad (the long-standing
+ * "press slider → everything gets bigger" bug). litegraph binds its touch
+ * listeners in the CAPTURE phase on an ANCESTOR of the DOM-widget layer
+ * (canvasEl.parentElement), so a bubble-phase stop on our own element is too
+ * late. A capture-phase listener on `document` runs first and stops the event
+ * before litegraph sees it; we only stopPropagation (never preventDefault), so
+ * the browser still performs the control's native touch action (slider drag,
+ * list scroll). Installed once, globally. */
+let LB_TOUCH_GUARD = false;
+function installTouchGuard() {
+    if (LB_TOUCH_GUARD) return;
+    LB_TOUCH_GUARD = true;
+    const guard = (e) => {
+        const t = e.target;
+        if (t && t.closest && t.closest(".lorabox-root")) e.stopPropagation();
+    };
+    for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"]) {
+        document.addEventListener(ev, guard, { capture: true, passive: true });
+    }
+}
+
+/* ---- lora picker grouping ------------------------------------------------ */
+const LORA_GROUP_ORDER = ["Z-Image", "Flux", "Krea", "LTX Video", "Other"];
+
+function loraCategory(name) {
+    if (!name || name === "None") return null;
+    if (LORA_CATEGORIES && LORA_CATEGORIES[name]) return LORA_CATEGORIES[name];
+    const low = name.toLowerCase().replace(/\\/g, "/");
+    if (low.includes("zimage") || low.includes("z-image") || low.includes("z_image")) return "Z-Image";
+    if (low.includes("ltx")) return "LTX Video";
+    if (low.includes("flux")) return "Flux";
+    if (low.includes("krea")) return "Krea";
+    return "Other";
+}
+
+function groupedLoraList(names, filter) {
+    const f = (filter || "").trim().toLowerCase();
+    const filtered = names.filter((n) => n === "None" || !f || n.toLowerCase().includes(f));
+    const groups = [];
+    if (filtered.includes("None")) groups.push({ label: null, items: ["None"] });
+    const buckets = Object.fromEntries(LORA_GROUP_ORDER.map((g) => [g, []]));
+    for (const n of filtered) {
+        if (n === "None") continue;
+        buckets[loraCategory(n)].push(n);
+    }
+    for (const g of LORA_GROUP_ORDER) {
+        buckets[g].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+        if (buckets[g].length) groups.push({ label: g, items: buckets[g] });
+    }
+    return groups;
+}
+
 /* ---- floating searchable lora picker ------------------------------------ */
 let CUR_POP = null;
+
 function onDocDown(e) {
     if (CUR_POP && !CUR_POP.contains(e.target) && e.target !== CUR_POP._anchor && !CUR_POP._anchor.contains(e.target)) closePop();
 }
@@ -185,7 +381,7 @@ function closePop() {
 async function openPicker(node, row, fieldEl) {
     if (CUR_POP && CUR_POP._anchor === fieldEl) { closePop(); return; }
     closePop();
-    await getLoraList();
+    await Promise.all([getLoraList(), getLoraCategories()]);
     const rect = fieldEl.getBoundingClientRect();
     const pop = document.createElement("div");
     pop.className = "lb-pop";
@@ -206,37 +402,55 @@ async function openPicker(node, row, fieldEl) {
     CUR_POP = pop;
     fieldEl.classList.add("open");
 
-    const all = ["None", ...(LORA_LIST || [])];
+    const all = LORA_LIST || [];
     let hi = 0;
-    const setHi = (items) => { items.forEach((x) => x.classList.remove("hi")); if (items[hi]) { items[hi].classList.add("hi"); items[hi].scrollIntoView({ block: "nearest" }); } };
+    const setHi = (items) => {
+        items.forEach((x) => x.classList.remove("hi"));
+        if (items[hi]) {
+            items[hi].classList.add("hi");
+            items[hi].scrollIntoView({ block: "nearest" });
+        }
+    };
     const draw = (flt) => {
-        const f = flt.trim().toLowerCase();
-        const items = all.filter((n) => n.toLowerCase().includes(f));
         listEl.innerHTML = "";
         hi = 0;
-        if (!items.length) {
-            const e = document.createElement("div"); e.className = "lb-pop-empty"; e.textContent = "no matches";
-            listEl.appendChild(e); return;
+        const groups = groupedLoraList(all, flt);
+        const flat = groups.flatMap((g) => g.items);
+        if (!flat.length) {
+            const e = document.createElement("div");
+            e.className = "lb-pop-empty";
+            e.textContent = "no matches";
+            listEl.appendChild(e);
+            return;
         }
-        items.forEach((n) => {
-            const it = document.createElement("div");
-            it.className = "lb-pop-item" + (n === row.name ? " sel" : "");
-            it.dataset.value = n;
-            it.textContent = n === "None" ? "— None —" : n;
-            it.onmousedown = (e) => { e.preventDefault(); pick(n); };
-            listEl.appendChild(it);
-        });
-        const first = listEl.children[0]; if (first) first.classList.add("hi");
+        for (const grp of groups) {
+            if (grp.label) {
+                const hdr = document.createElement("div");
+                hdr.className = "lb-pop-group";
+                hdr.textContent = grp.label;
+                listEl.appendChild(hdr);
+            }
+            for (const n of grp.items) {
+                const it = document.createElement("button");
+                it.type = "button";
+                it.className = "lb-pop-item" + (n === row.name ? " sel" : "");
+                it.dataset.value = n;
+                it.textContent = n === "None" ? "— None —" : n;
+                it.title = n;
+                it.onmousedown = (e) => { e.preventDefault(); pick(n); };
+                listEl.appendChild(it);
+            }
+        }
+        const first = listEl.querySelector(".lb-pop-item");
+        if (first) first.classList.add("hi");
     };
     const pick = (n) => {
         row.name = n;
-        const txt = fieldEl.querySelector(".txt");
-        txt.textContent = n === "None" ? "None" : n;
-        txt.classList.toggle("none", n === "None");
-        fieldEl.title = n;
         serialize(node);
-        markDuplicates(node);
         closePop();
+        // re-render so the row's thumbnail reloads for the newly chosen lora
+        renderRows(node);
+        sizeNode(node);
     };
     search.oninput = () => draw(search.value);
     search.onkeydown = (e) => {
@@ -246,7 +460,10 @@ async function openPicker(node, row, fieldEl) {
         else if (e.key === "ArrowUp") { e.preventDefault(); hi = Math.max(hi - 1, 0); setHi(items); }
         else if (e.key === "Enter") { e.preventDefault(); if (items[hi]) pick(items[hi].dataset.value); }
     };
-    stop(search); stop(pop); eatWheel(pop);
+    stop(search);
+    stop(pop);
+    // Let the list scroll; only stop wheel from reaching the canvas.
+    listEl.addEventListener("wheel", (e) => e.stopPropagation(), { passive: true });
     draw("");
     setTimeout(() => {
         search.focus();
@@ -260,6 +477,7 @@ app.registerExtension({
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "LoraBox") return;
         injectStyle();
+        installTouchGuard();
 
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
@@ -273,6 +491,8 @@ app.registerExtension({
             node._lbRows = [];
             node._lbSep = false;
             node._lbMute = false;
+            node._lbPos = "end";
+            node._lbDelim = ", ";
             node._lbContentH = 150;
 
             const root = document.createElement("div");
@@ -292,6 +512,33 @@ app.registerExtension({
             node._lbMuteCb = mkCheck(head, "mute all", (v) => { node._lbMute = v; applyMute(node); serialize(node); });
             node._lbSepCb = mkCheck(head, "model + clip", (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
             inner.appendChild(head);
+
+            // Second header line: where to inject the LoRA trigger words into a
+            // connected prompt, and the separator used. Stored in `data` (pos /
+            // delim) so it round-trips with the workflow like everything else.
+            const head2 = document.createElement("div");
+            head2.className = "lb-head2";
+            head2.title = "How LoRA trigger words merge into a connected prompt";
+            const h2lbl = document.createElement("span");
+            h2lbl.className = "lb-h2lbl"; h2lbl.textContent = "triggers:";
+            const sel = document.createElement("select");
+            [["end", "at end of prompt"], ["beginning", "at start of prompt"]].forEach(([v, t]) => {
+                const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
+            });
+            sel.value = node._lbPos || "end";
+            sel.onchange = () => { node._lbPos = sel.value; serialize(node); };
+            stop(sel); eatWheel(sel);
+            node._lbPosSel = sel;
+            const dlbl = document.createElement("span");
+            dlbl.className = "lb-h2lbl"; dlbl.textContent = "sep";
+            const delim = document.createElement("input");
+            delim.className = "lb-delim"; delim.value = node._lbDelim != null ? node._lbDelim : ", ";
+            delim.title = "delimiter between prompt and trigger words";
+            delim.onchange = () => { node._lbDelim = delim.value; serialize(node); };
+            stop(delim); eatWheel(delim);
+            node._lbDelimIn = delim;
+            head2.append(h2lbl, sel, dlbl, delim);
+            inner.appendChild(head2);
 
             const list = document.createElement("div");
             list.className = "lb-list";
@@ -358,7 +605,7 @@ app.registerExtension({
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
-        nodeType.prototype.onRemoved = function () { closePop(); onRemoved && onRemoved.apply(this, arguments); };
+        nodeType.prototype.onRemoved = function () { closePop(); closeThumbPop(); onRemoved && onRemoved.apply(this, arguments); };
     },
 });
 
@@ -472,9 +719,11 @@ function initFromData(node) {
     // {v, mute, rows} object (see serialize / the Python apply()).
     let parsed = [];
     try { parsed = JSON.parse(dataW?.value || "[]"); } catch (e) { parsed = []; }
-    let rows = parsed, mute = false;
+    let rows = parsed, mute = false, pos = "end", delim = ", ";
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
         mute = !!parsed.mute;
+        if (typeof parsed.pos === "string") pos = parsed.pos;
+        if (typeof parsed.delim === "string") delim = parsed.delim;
         rows = Array.isArray(parsed.rows) ? parsed.rows : [];
     }
     if (!Array.isArray(rows)) rows = [];
@@ -489,8 +738,15 @@ function initFromData(node) {
     });
     node._lbSep = node._lbRows.some((r) => r.sc !== r.sm);
     node._lbMute = mute;
+    node._lbPos = pos;
+    node._lbDelim = delim;
     if (node._lbSepCb) node._lbSepCb.checked = node._lbSep;
-    if (node._lbMuteCb) node._lbMuteCb.checked = false;
+    // Restore the saved "mute all" state so a workflow saved while muted reopens
+    // muted *and* shows the checkbox ticked (was always reset to false, which
+    // left LoRAs silently un-applied with an empty checkbox — nothing to undo).
+    if (node._lbMuteCb) node._lbMuteCb.checked = node._lbMute;
+    if (node._lbPosSel) node._lbPosSel.value = node._lbPos;
+    if (node._lbDelimIn) node._lbDelimIn.value = node._lbDelim;
     renderRows(node); sizeNode(node); serialize(node);
 }
 
@@ -504,7 +760,12 @@ function serialize(node) {
         if (typeof r.trig === "string") o.trig = r.trig;
         return o;
     });
-    node._lbDataW.value = JSON.stringify({ v: 1, mute: !!node._lbMute, rows });
+    node._lbDataW.value = JSON.stringify({
+        v: 1, mute: !!node._lbMute,
+        pos: node._lbPos || "end",
+        delim: node._lbDelim != null ? node._lbDelim : ", ",
+        rows,
+    });
 }
 
 function mkNum(val, title, onChange) {
@@ -552,7 +813,10 @@ function renderRows(node) {
         txt.textContent = row.name && row.name !== "None" ? row.name : "None";
         const car = document.createElement("span"); car.className = "car"; car.textContent = "▼";
         field.append(txt, car);
-        field.onclick = (e) => { e.stopPropagation(); openPicker(node, row, field); };
+        field.onclick = (e) => {
+            e.stopPropagation();
+            openPicker(node, row, field);
+        };
         stop(field);
 
         const rnd = document.createElement("button");
@@ -590,13 +854,99 @@ function renderRows(node) {
             l2.append(tag, cnum);
         }
 
-        card.append(l1, l2);
+        const content = document.createElement("div");
+        content.className = "lb-content";
+        content.append(l1, l2);
+
+        const main = document.createElement("div");
+        main.className = "lb-main";
+        main.append(buildThumb(node, row), content);
+
+        card.append(main);
         if (row._open) card.append(buildTrigEditor(node, row));
 
         list.appendChild(card);
     });
 
     markDuplicates(node);
+}
+
+/* per-row thumbnail: shows the lora's sidecar image (shared across workflows),
+ * click to set/change, hover to enlarge, ✕ to remove. */
+function buildThumb(node, row) {
+    const thumb = document.createElement("div");
+    thumb.className = "lb-thumb";
+    thumb.title = "click to set a picture for this lora";
+    const img = document.createElement("img");
+    const ph = document.createElement("div");
+    ph.className = "lb-ph";
+    ph.innerHTML = '<span>🖼</span><span class="lb-ph-t">add</span>';
+    const x = document.createElement("div");
+    x.className = "lb-thumb-x"; x.textContent = "✕"; x.title = "remove picture";
+    const gen = document.createElement("div");
+    gen.className = "lb-thumb-gen"; gen.textContent = "⚡"; gen.title = "generate canonical preview (Z-Image test)";
+    thumb.append(img, ph, x, gen);
+
+    const setURL = (url) => {
+        if (thumb._url) { try { URL.revokeObjectURL(thumb._url); } catch (e) {} }
+        thumb._url = url || null;
+        if (url) { img.src = url; thumb.classList.add("has-img"); }
+        else { img.removeAttribute("src"); thumb.classList.remove("has-img"); }
+    };
+    const refresh = () => {
+        if (!row.name || row.name === "None") { setURL(null); return; }
+        loadPreviewURL(row.name).then((u) => {
+            // guard against a stale async result after the row name changed
+            if (document.body.contains(thumb)) setURL(u);
+        });
+    };
+    thumb._lbRefresh = refresh;
+    refresh();
+
+    thumb.onclick = (e) => {
+        e.stopPropagation();
+        if (!row.name || row.name === "None") { return; }   // pick a lora first
+        const inp = document.createElement("input");
+        inp.type = "file"; inp.accept = "image/*";
+        inp.onchange = async () => {
+            const f = inp.files && inp.files[0];
+            if (!f) return;
+            if (f.size > 8 * 1024 * 1024) { alert("Image too large (max 8 MB)."); return; }
+            const ok = await uploadPreview(row.name, f);
+            if (ok) refresh();
+        };
+        inp.click();
+    };
+    x.onclick = async (e) => {
+        e.stopPropagation();
+        if (!row.name || row.name === "None") return;
+        closeThumbPop();
+        await deletePreview(row.name);
+        refresh();
+    };
+    gen.onclick = async (e) => {
+        e.stopPropagation();
+        if (!row.name || row.name === "None") return;
+        if (gen.classList.contains("busy")) return;
+        gen.classList.add("busy");
+        gen.textContent = "…";
+        const res = await generatePreview(row.name, "character");
+        gen.classList.remove("busy");
+        if (res.ok) {
+            gen.textContent = "✓";
+            gen.classList.add("ok");
+            refresh();
+            setTimeout(() => { gen.textContent = "⚡"; gen.classList.remove("ok"); }, 2000);
+        } else {
+            gen.textContent = "!";
+            alert("Preview failed: " + (res.error || "unknown error"));
+            setTimeout(() => { gen.textContent = "⚡"; }, 2500);
+        }
+    };
+    thumb.onmouseenter = () => { if (thumb._url) openThumbPop(thumb, thumb._url); };
+    thumb.onmouseleave = () => closeThumbPop();
+    stop(thumb);
+    return thumb;
 }
 
 function buildTrigEditor(node, row) {
@@ -649,7 +999,7 @@ function sizeNode(node) {
     let listH;
     if (rows.length === 0) listH = 40;
     else listH = rows.reduce((a, r) => a + CARD_BASE + (r._open ? TRIG_GAP + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
-    node._lbContentH = ROOT_PAD + INNER_GAP + HEAD_H + listH + ADD_H + BUFFER;
+    node._lbContentH = ROOT_PAD + INNER_GAP + HEAD_H + HEAD2_H + listH + ADD_H + BUFFER;
     // Only the HEIGHT is ours to manage; width is whatever the user set. We
     // preserve the current width and let computeSize derive the new height from
     // our getMinHeight/getMaxHeight. This never changes width, so value changes

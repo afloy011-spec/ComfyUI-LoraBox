@@ -70,9 +70,9 @@ class LoraBoxTest(unittest.TestCase):
         _LORAS["a.safetensors"] = self.a
         self.node = lora_box.LoraBox()
 
-    def _apply(self, rows, mute=False):
-        data = json.dumps({"v": 1, "mute": mute, "rows": rows})
-        return self.node.apply([], [], data)
+    def _apply(self, rows, mute=False, prompt=None, pos="end", delim=", "):
+        data = json.dumps({"v": 1, "mute": mute, "pos": pos, "delim": delim, "rows": rows})
+        return self.node.apply([], [], prompt=prompt, data=data)
 
     # --- security -------------------------------------------------------------
     def test_safe_path_rejects_unknown(self):
@@ -92,9 +92,9 @@ class LoraBoxTest(unittest.TestCase):
         self.assertEqual(_APPLIED, [])
 
     def test_strength_clamped(self):
-        self._apply([{"on": True, "name": "a.safetensors", "sm": 5, "sc": -3}])
-        # sm clamps to 2.0; sc clamps to 0.0 (not both zero, so still applied)
-        self.assertEqual(_APPLIED, [("a.safetensors", 2.0, 0.0)])
+        self._apply([{"on": True, "name": "a.safetensors", "sm": 5, "sc": -5}])
+        # sm clamps to 3.0; sc clamps to -3.0 (negative weights are allowed)
+        self.assertEqual(_APPLIED, [("a.safetensors", 3.0, -3.0)])
 
     def test_both_zero_skipped(self):
         self._apply([{"on": True, "name": "a.safetensors", "sm": 0, "sc": 0}])
@@ -110,9 +110,14 @@ class LoraBoxTest(unittest.TestCase):
         self.assertEqual(_APPLIED, [])
 
     def test_mute_skips_everything(self):
-        m, c, tw = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}], mute=True)
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}], mute=True)
         self.assertEqual(_APPLIED, [])
-        self.assertEqual(tw, "")
+        self.assertEqual(merged, "")
+
+    def test_mute_passes_prompt_through(self):
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}],
+                                   mute=True, prompt="hello world")
+        self.assertEqual(merged, "hello world")
 
     def test_none_name_skipped(self):
         self._apply([{"on": True, "name": "None", "sm": 1.0}])
@@ -120,22 +125,48 @@ class LoraBoxTest(unittest.TestCase):
 
     def test_legacy_bare_list(self):
         data = json.dumps([{"on": True, "name": "a.safetensors", "sm": 0.8}])
-        self.node.apply([], [], data)
+        self.node.apply([], [], data=data)
         self.assertEqual(_APPLIED, [("a.safetensors", 0.8, 0.8)])
 
     def test_bad_json_is_noop(self):
-        m, c, tw = self.node.apply([], [], "{not json")
+        m, c, merged = self.node.apply([], [], data="{not json")
         self.assertEqual(_APPLIED, [])
-        self.assertEqual(tw, "")
+        self.assertEqual(merged, "")
 
     # --- trigger words --------------------------------------------------------
     def test_trigger_words_autodetected(self):
-        m, c, tw = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}])
-        self.assertEqual(tw, "alpha, beta")
+        # with no prompt the merged output is just the (auto) trigger words
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}], prompt=None)
+        self.assertEqual(merged, "alpha, beta")
 
     def test_trigger_override_wins(self):
-        m, c, tw = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0, "trig": "custom"}])
-        self.assertEqual(tw, "custom")
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0, "trig": "custom"}],
+                                   prompt=None)
+        self.assertEqual(merged, "custom")
+
+    # --- merged prompt output -------------------------------------------------
+    def test_prompt_merge_end(self):
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}],
+                                   prompt="a portrait", pos="end")
+        self.assertEqual(merged, "a portrait, alpha, beta")
+
+    def test_prompt_merge_beginning(self):
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}],
+                                   prompt="a portrait", pos="beginning")
+        self.assertEqual(merged, "alpha, beta, a portrait")
+
+    def test_prompt_none_returns_triggers(self):
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}], prompt=None)
+        self.assertEqual(merged, "alpha, beta")
+
+    def test_prompt_no_lora_passthrough(self):
+        m, c, merged = self._apply([{"on": True, "name": "None", "sm": 1.0}], prompt="just me")
+        self.assertEqual(merged, "just me")
+
+    def test_prompt_custom_delimiter(self):
+        m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}],
+                                   prompt="p", pos="end", delim=" BREAK ")
+        self.assertEqual(merged, "p BREAK alpha, beta")
 
     def test_metadata_cache_hit(self):
         lora_box.trigger_words_for("a.safetensors")
@@ -147,15 +178,87 @@ class LoraBoxTest(unittest.TestCase):
     def test_is_changed_tracks_data(self):
         d1 = json.dumps({"rows": [{"name": "a.safetensors", "sm": 1.0}]})
         d2 = json.dumps({"rows": [{"name": "a.safetensors", "sm": 0.5}]})
-        self.assertNotEqual(lora_box.LoraBox.IS_CHANGED([], [], d1),
-                            lora_box.LoraBox.IS_CHANGED([], [], d2))
+        self.assertNotEqual(lora_box.LoraBox.IS_CHANGED([], [], data=d1),
+                            lora_box.LoraBox.IS_CHANGED([], [], data=d2))
+
+    def test_is_changed_tracks_prompt(self):
+        d = json.dumps({"rows": [{"name": "a.safetensors", "sm": 1.0}]})
+        self.assertNotEqual(lora_box.LoraBox.IS_CHANGED([], [], prompt="x", data=d),
+                            lora_box.LoraBox.IS_CHANGED([], [], prompt="y", data=d))
 
     def test_is_changed_tracks_file_mtime(self):
         d = json.dumps({"rows": [{"name": "a.safetensors", "sm": 1.0}]})
-        h1 = lora_box.LoraBox.IS_CHANGED([], [], d)
+        h1 = lora_box.LoraBox.IS_CHANGED([], [], data=d)
         os.utime(self.a, (0, 0))  # change mtime
-        h2 = lora_box.LoraBox.IS_CHANGED([], [], d)
+        h2 = lora_box.LoraBox.IS_CHANGED([], [], data=d)
         self.assertNotEqual(h1, h2)
+
+    # --- category grouping ---------------------------------------------------
+    def test_category_from_name(self):
+        self.assertEqual(lora_box._category_from_name("foo_zimage_bar.safetensors"), "Z-Image")
+        self.assertEqual(lora_box._category_from_name("krea2_x.safetensors"), "Krea")
+        self.assertEqual(lora_box._category_from_name("pinterest_girl.safetensors"), "Other")
+
+    def test_category_from_metadata(self):
+        self.assertEqual(lora_box._category_from_meta({"ss_base_model_version": "zimage"}), "Z-Image")
+        self.assertEqual(lora_box._category_from_meta(
+            {"modelspec.architecture": "zimageturbo/lora"}), "Z-Image")
+
+    def test_category_for_uses_metadata_when_name_generic(self):
+        p = os.path.join(self.tmp, "pinterest_girl.safetensors")
+        _make_safetensors(p, {"ss_base_model_version": "zimage"})
+        _LORAS["pinterest_girl.safetensors"] = p
+        self.assertEqual(lora_box.category_for("pinterest_girl.safetensors"), "Z-Image")
+
+
+class PromptMergeTest(unittest.TestCase):
+    def setUp(self):
+        self.node = lora_box.LoraBoxPromptMerge()
+        self.END = lora_box.POS_END
+        self.BEGIN = lora_box.POS_BEGIN
+
+    def m(self, prompt, triggers, position, delimiter=", "):
+        return self.node.merge(prompt, triggers, position, delimiter)[0]
+
+    def test_end_appends(self):
+        self.assertEqual(self.m("a portrait", "trig1, trig2", self.END),
+                         "a portrait, trig1, trig2")
+
+    def test_beginning_prepends(self):
+        self.assertEqual(self.m("a portrait", "trig1, trig2", self.BEGIN),
+                         "trig1, trig2, a portrait")
+
+    def test_switch_actually_changes_output(self):
+        end = self.m("p", "t", self.END)
+        beg = self.m("p", "t", self.BEGIN)
+        self.assertNotEqual(end, beg)
+        self.assertTrue(end.endswith("t"))
+        self.assertTrue(beg.startswith("t"))
+
+    def test_custom_delimiter(self):
+        self.assertEqual(self.m("p", "t", self.END, delimiter=" BREAK "),
+                         "p BREAK t")
+
+    def test_empty_triggers_returns_prompt(self):
+        self.assertEqual(self.m("only prompt", "", self.BEGIN), "only prompt")
+        self.assertEqual(self.m("only prompt", "   ", self.END), "only prompt")
+
+    def test_empty_prompt_returns_triggers(self):
+        self.assertEqual(self.m("", "t1, t2", self.END), "t1, t2")
+
+    def test_no_duplicate_triggers(self):
+        # trig1 already in the prompt -> not added again, regardless of side
+        self.assertEqual(self.m("scene with trig1 here", "trig1, trig2", self.END),
+                         "scene with trig1 here, trig2")
+        self.assertEqual(self.m("scene with trig1 here", "trig1, trig2", self.BEGIN),
+                         "trig2, scene with trig1 here")
+
+    def test_all_triggers_duplicate_returns_prompt(self):
+        self.assertEqual(self.m("has trig1 and trig2", "trig1, trig2", self.END),
+                         "has trig1 and trig2")
+
+    def test_whitespace_trimmed(self):
+        self.assertEqual(self.m("  p  ", "  t  ", self.END), "p, t")
 
 
 if __name__ == "__main__":

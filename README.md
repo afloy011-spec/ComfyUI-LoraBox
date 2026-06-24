@@ -14,7 +14,15 @@ offering a one-row-per-LoRA design.
 - **Mute all** that survives a workflow save without wiping per-row on/off state.
 - Drag-to-reorder rows; duplicate LoRAs are highlighted.
 - Per-row trigger words: auto-detected from safetensors metadata, fully editable,
-  resettable to auto. Emitted on the `trigger_words` output.
+  resettable to auto. Merged straight into the `prompt` output.
+- **Per-LoRA preview pictures**: each row shows a thumbnail of the LoRA so they
+  are easy to tell apart. Click the thumbnail to attach an image, hover to
+  enlarge it, ✕ to remove. The picture is stored as a sidecar next to the
+  `.safetensors` (same basename), so it *belongs to the LoRA* and shows in every
+  workflow / every Lora Box once set.
+- **Generate preview** (⚡ on the thumbnail): runs a fixed canonical Z-Image Turbo
+  test (same prompt template + seed for every LoRA) and saves the result as the
+  sidecar automatically.
 - Random-LoRA button (🎲).
 
 ## Node
@@ -25,18 +33,44 @@ offering a one-row-per-LoRA design.
 |-------|------|-------|
 | `model` | MODEL | required |
 | `clip`  | CLIP  | required |
+| `prompt` | STRING | optional input; if connected, returns it with trigger words merged in |
 | `data`  | STRING | hidden; JSON kept in sync by the panel |
 
-Outputs: `MODEL`, `CLIP`, `trigger_words` (STRING).
+Outputs: `MODEL`, `CLIP`, `prompt` (STRING — the prompt with trigger words
+merged in).
 
-Strengths are clamped to `0..2`; non-finite values (NaN/Inf) are rejected.
+The panel header has a **triggers** dropdown (`at end` / `at start of prompt`)
+and a **sep** field (delimiter); both are stored in `data` and drive the merged
+`prompt` output. So one node loads the LoRA *and* injects its trigger word into
+the prompt automatically — no separate merge node needed. (If `prompt` is not
+connected, `prompt` output is just the trigger words; mute passes the prompt
+through untouched.)
+
+Strengths are clamped to `-3..3` (negative "anti-LoRA" weights allowed);
+non-finite values (NaN/Inf) are rejected.
+
+### Prompt + Triggers (Lora Box) (`LoraBoxPromptMerge`, category `loaders`)
+
+Merges a prompt with LoRA trigger words and exposes a single **position** switch
+to place the triggers at the **beginning** or the **end** of the prompt. Replaces
+the fragile `JoinStrings` + `JoinStrings` + `LazySwitchKJ` combo.
+
+| Input | Type | Notes |
+|-------|------|-------|
+| `prompt` | STRING (input) | the base prompt |
+| `triggers` | STRING (input) | trigger words (e.g. from Afloy Lora Box) |
+| `position` | combo | `end (append after prompt)` / `beginning (prepend before prompt)` |
+| `delimiter` | STRING | default `", "` |
+
+Output: `prompt` (STRING). Empty sides are handled without stray delimiters, and
+trigger words already present in the prompt are not duplicated.
 
 ## Install
 
 Clone into `ComfyUI/custom_nodes/` and restart ComfyUI:
 
 ```
-ComfyUI/custom_nodes/afloy-lora-box/
+ComfyUI/custom_nodes/ComfyUI-LoraBox/
 ├── __init__.py
 ├── lora_box.py
 ├── pyproject.toml
@@ -58,5 +92,8 @@ Tests stub `folder_paths` / `comfy.*`, so they run without a full ComfyUI instal
   mtime, so replacing a `.safetensors` on disk transparently re-reads it.
 - `IS_CHANGED` hashes the row JSON plus the mtime of each referenced LoRA, so
   cached outputs / trigger words never go stale.
-- The `/lorabox/triggers` route only reads files that are in the registered
-  loras list (guards against path traversal / arbitrary file reads).
+- The `/lorabox/triggers` and `/lorabox/preview` routes only touch files whose
+  name is in the registered loras list (guards against path traversal /
+  arbitrary file reads or writes). Preview uploads are capped at 8 MB and limited
+  to `png/jpg/jpeg/webp/gif`; the sidecar is `<lora-basename>.<ext>` next to the
+  model file.
