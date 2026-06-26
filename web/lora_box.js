@@ -303,8 +303,9 @@ function injectStyle() {
    Figma "LoraBox" variable collection. Defined on :root so the floating
    popups / menus / toast (appended to <body>, outside .lorabox) inherit them. */
 :root{
-  --lb-accent:#3b82f6;        /* primary blue (switch on, slider fill, focus) */
+  --lb-accent:#3b82f6;        /* primary blue (switch on, MODEL slider fill, focus) */
   --lb-accent-soft:#1d3a5f;   /* active badge / selected row / menu hover bg  */
+  --lb-clip:#22c55e;          /* green CLIP slider fill (ties to the CLIP socket) */
   --lb-field:#0d0d0d;         /* inset fields: value box, search, trigger box */
   --lb-border:#2e2e2e;        /* default control border                      */
 }
@@ -423,7 +424,7 @@ function injectStyle() {
 .lorabox .lb-wrow{display:grid; grid-template-columns:auto minmax(0,1fr) 46px; gap:8px;
   align-items:center; min-width:0; height:20px;}
 .lorabox .lb-card.lb-sep .lb-wlbl{min-width:58px;}
-.lorabox .lb-wlbl{font-size:9px; letter-spacing:.04em; text-transform:uppercase; color:#666; white-space:nowrap;}
+.lorabox .lb-wlbl{font-size:9px; letter-spacing:.04em; text-transform:uppercase; color:#555; white-space:nowrap;}
 .lorabox .lb-slider{-webkit-appearance:none; appearance:none; width:100%; min-width:36px; height:4px;
   border-radius:2px; background:#2a2a2a; outline:none; cursor:pointer;}
 .lorabox .lb-slider::-webkit-slider-thumb{-webkit-appearance:none; width:12px; height:12px; border-radius:50%;
@@ -568,9 +569,10 @@ const CHEVRON_UP_SVG = svg('<path d="m18 15-6-6-6 6"/>', 16);
 
 // Paint the blue fill on a native range input up to its current value, like the
 // Figma slider (blue left of the thumb, grey track to the right).
-function setSliderFill(slider, v) {
+function setSliderFill(slider, v, fill) {
     const pct = Math.max(0, Math.min(100, ((v - SMIN) / (SMAX - SMIN)) * 100));
-    slider.style.background = `linear-gradient(to right, var(--lb-accent,#3b82f6) 0 ${pct}%, #2a2a2a ${pct}% 100%)`;
+    const c = fill || "var(--lb-accent,#3b82f6)";
+    slider.style.background = `linear-gradient(to right, ${c} 0 ${pct}%, #2a2a2a ${pct}% 100%)`;
 }
 const STRENGTH_TIP = "Strength: 0 = off, 1 = normal, up to 2 = stronger than trained.";
 
@@ -1295,7 +1297,7 @@ function renderRows(node) {
         l1.append(sw, field, trig, del);
 
         // ── weight row(s): LABEL · slider (blue fill) · value box ──
-        const mkWeightRow = (label, value, onChange) => {
+        const mkWeightRow = (label, value, onChange, fill) => {
             const r = document.createElement("div");
             r.className = "lb-wrow";
             const lbl = document.createElement("span"); lbl.className = "lb-wlbl"; lbl.textContent = label;
@@ -1303,13 +1305,13 @@ function renderRows(node) {
             slider.className = "lb-slider"; slider.type = "range";
             slider.min = String(SMIN); slider.max = String(SMAX); slider.step = "0.05"; slider.value = String(value);
             slider.title = STRENGTH_TIP;
-            setSliderFill(slider, value);
+            setSliderFill(slider, value, fill);
             const num = mkNum(value, label.replace("WEIGHT", "strength") + ". " + STRENGTH_TIP, (v) => {
-                slider.value = String(v); setSliderFill(slider, v); onChange(v);
+                slider.value = String(v); setSliderFill(slider, v, fill); onChange(v);
             });
             slider.oninput = () => {
                 const v = clampS(parseFloat(slider.value));
-                num.value = fmtNum(v); tintNum(num, v); setSliderFill(slider, v); onChange(v);
+                num.value = fmtNum(v); tintNum(num, v); setSliderFill(slider, v, fill); onChange(v);
             };
             stop(slider); eatWheel(slider);
             r.append(lbl, slider, num);
@@ -1322,7 +1324,7 @@ function renderRows(node) {
         if (node._lbSep) {
             content.append(
                 mkWeightRow("MODEL WEIGHT", row.sm, (v) => { row.sm = v; serialize(node); }),
-                mkWeightRow("CLIP WEIGHT", row.sc != null ? row.sc : row.sm, (v) => { row.sc = v; serialize(node); }),
+                mkWeightRow("CLIP WEIGHT", row.sc != null ? row.sc : row.sm, (v) => { row.sc = v; serialize(node); }, "var(--lb-clip,#22c55e)"),
             );
         } else {
             content.append(mkWeightRow("WEIGHT", row.sm, (v) => { row.sm = v; serialize(node); }));
