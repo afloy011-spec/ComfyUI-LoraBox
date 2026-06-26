@@ -407,9 +407,12 @@ function injectStyle() {
 .lorabox .lb-thumb.busy{opacity:.6; animation:lb-pulse 1s ease infinite;}
 @keyframes lb-pulse{0%,100%{opacity:.5}50%{opacity:1}}
 
-/* row line 1: switch · name(grows, borderless) · bookmark · delete */
-.lorabox .lb-l1{display:grid; grid-template-columns:auto minmax(90px,1fr) auto auto; gap:8px;
+/* row line 1: switch · name(grows) · [extra-params · delete] action cluster */
+.lorabox .lb-l1{display:grid; grid-template-columns:auto minmax(90px,1fr) auto; gap:10px;
   align-items:center; min-width:0; height:24px;}
+/* the two trailing icons read as one tidy group, set a touch apart from each
+   other and clearly separated from the name field (the grid gap above) */
+.lorabox .lb-l1-actions{display:flex; align-items:center; gap:6px;}
 .lorabox .lb-ico svg{display:block;}
 /* the LoRA picker field — a visible, clickable combobox (min 90px so it can
    never collapse), so there's always a clear "choose a LoRA" control. */
@@ -569,7 +572,7 @@ const TAG_SVG = svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/>
 // minus while the panel is open (a rotated × would clash with the adjacent delete ×)
 const PLUS_SVG = svg('<path d="M12 5v14M5 12h14"/>', 16);
 const MINUS_SVG = svg('<path d="M5 12h14"/>', 16);
-const X_SVG = svg('<path d="M18 6 6 18M6 6l12 12"/>');
+const X_SVG = svg('<path d="M18 6 6 18M6 6l12 12"/>', 16);
 const GEAR_SVG = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 16);
 const SEARCH_SVG = svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 16);
 const CHECK_SVG = svg('<path d="M20 6 9 17l-5-5"/>', 16);
@@ -1300,7 +1303,10 @@ function renderRows(node) {
         };
         stop(del);
 
-        l1.append(sw, field, trig, del);
+        const acts = document.createElement("div");
+        acts.className = "lb-l1-actions";
+        acts.append(trig, del);
+        l1.append(sw, field, acts);
 
         // ── weight row(s): LABEL · slider (blue fill) · value box ──
         const mkWeightRow = (label, value, onChange, fill) => {

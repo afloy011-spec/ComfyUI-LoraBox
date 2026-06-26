@@ -89,6 +89,44 @@ def _read_st_metadata(path):
     return meta
 
 
+def _sidecar_triggers(path):
+    """Trigger words from a text / JSON sidecar next to the lora.
+
+    Many loras carry NO trigger field in the safetensors header (AI Toolkit /
+    Ostris exports are often metadata-empty), but model managers drop a sidecar:
+      <base>.txt            — comma/newline-separated trigger words
+      <base>.civitai.info   — Civitai model-version JSON  ("trainedWords")
+      <base>.cm-info.json   — Civitai-Helper JSON  ("trainedWords"/"activation text")
+    Fast local read, safe to call during graph execution.
+    """
+    base = os.path.splitext(path)[0]
+    p = base + ".txt"
+    if os.path.exists(p):
+        try:
+            with open(p, encoding="utf-8") as f:
+                txt = f.read()
+            return [w.strip() for w in txt.replace("\n", ",").split(",") if w.strip()]
+        except OSError:
+            pass
+    for ext in (".civitai.info", ".cm-info.json"):
+        p = base + ext
+        if not os.path.exists(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                j = json.load(f)
+        except Exception:
+            continue
+        tw = j.get("trainedWords") or j.get("activation text") or j.get("trigger_words")
+        if isinstance(tw, str):
+            tw = tw.split(",")
+        if isinstance(tw, list):
+            out = [str(w).strip() for w in tw if str(w).strip()]
+            if out:
+                return out
+    return []
+
+
 def trigger_words_for(name):
     path = _safe_lora_path(name)
     if not path:
@@ -105,6 +143,10 @@ def trigger_words_for(name):
         v = meta.get(k)
         if isinstance(v, str) and v.strip():
             words.extend([w.strip() for w in v.split(",") if w.strip()])
+
+    # Supplement empty/partial header metadata with a sidecar file, if present.
+    if not words:
+        words.extend(_sidecar_triggers(path))
 
     seen, out = set(), []
     for w in words:
@@ -298,6 +340,37 @@ def _fetch_civitai_preview(name):
         return None
 
 
+_CIVITAI_TRIG = {}           # path -> [words]   (resolved Civitai trainedWords)
+_CIVITAI_TRIG_MISS = set()   # paths with no Civitai match / no trainedWords
+
+
+def _fetch_civitai_triggers(name):
+    """No local trigger source -> resolve trainedWords on Civitai by file hash.
+
+    Blocking (hash + network); call it OFF the event loop. Best-effort and
+    cached, so a hit is instant afterwards and a miss is never retried. This is
+    only wired into the /lorabox/triggers route, never into graph execution.
+    """
+    path = _safe_lora_path(name)
+    if not path or path in _CIVITAI_TRIG_MISS:
+        return []
+    if path in _CIVITAI_TRIG:
+        return _CIVITAI_TRIG[path]
+    try:
+        sha = _sha256(path)
+        meta = json.loads(_http_get(
+            "https://civitai.com/api/v1/model-versions/by-hash/" + sha, 12).decode("utf-8"))
+        out = [str(w).strip() for w in (meta.get("trainedWords") or []) if str(w).strip()][:50]
+        if out:
+            _CIVITAI_TRIG[path] = out
+            return out
+        _CIVITAI_TRIG_MISS.add(path)
+    except Exception as e:
+        _CIVITAI_TRIG_MISS.add(path)
+        log.info("Civitai trigger fetch failed for %s: %s", name, e)
+    return []
+
+
 # Optional API routes so the UI can show trigger words / preview images.
 try:
     from server import PromptServer
@@ -306,7 +379,13 @@ try:
     @PromptServer.instance.routes.get("/lorabox/triggers")
     async def _lorabox_triggers(request):
         file = request.query.get("file", "")
-        return web.json_response({"file": file, "words": trigger_words_for(file)})
+        words = trigger_words_for(file)
+        if not words:
+            # no local source (empty header metadata, no sidecar): try Civitai by
+            # file hash off the event loop (hashing + network are blocking)
+            words = await asyncio.get_event_loop().run_in_executor(
+                None, _fetch_civitai_triggers, file)
+        return web.json_response({"file": file, "words": words})
 
     @PromptServer.instance.routes.get("/lorabox/categories")
     async def _lorabox_categories(request):

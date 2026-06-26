@@ -149,6 +149,32 @@ class LoraBoxTest(unittest.TestCase):
                                    prompt=None)
         self.assertEqual(merged, "custom")
 
+    def test_sidecar_txt_triggers(self):
+        # a lora whose safetensors carries NO trigger metadata, but a .txt
+        # sidecar lives next to it -> words come from the sidecar
+        b = os.path.join(self.tmp, "b.safetensors")
+        _make_safetensors(b, {})
+        _LORAS["b.safetensors"] = b
+        with open(os.path.join(self.tmp, "b.txt"), "w", encoding="utf-8") as f:
+            f.write("sks man, wearing a hat\nphotorealistic")
+        self.assertEqual(lora_box.trigger_words_for("b.safetensors"),
+                         ["sks man", "wearing a hat", "photorealistic"])
+
+    def test_sidecar_civitai_info_triggers(self):
+        b = os.path.join(self.tmp, "c.safetensors")
+        _make_safetensors(b, {})
+        _LORAS["c.safetensors"] = b
+        with open(os.path.join(self.tmp, "c.civitai.info"), "w", encoding="utf-8") as f:
+            json.dump({"trainedWords": ["myloratoken", "anime style"]}, f)
+        self.assertEqual(lora_box.trigger_words_for("c.safetensors"),
+                         ["myloratoken", "anime style"])
+
+    def test_header_metadata_wins_over_sidecar(self):
+        # the safetensors trigger field is authoritative; sidecar only fills gaps
+        with open(os.path.join(self.tmp, "a.txt"), "w", encoding="utf-8") as f:
+            f.write("ignored")
+        self.assertEqual(lora_box.trigger_words_for("a.safetensors"), ["alpha", "beta"])
+
     # --- merged prompt output -------------------------------------------------
     def test_prompt_merge_end(self):
         m, c, merged = self._apply([{"on": True, "name": "a.safetensors", "sm": 1.0}],
