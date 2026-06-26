@@ -26,7 +26,11 @@ const GAP = 8, MIN_W = 240, FIXED_W = 380;
 // (40), 56px thumbnail cards, model+clip adds a second weight row (SEP_EXTRA),
 // trigger editor is a titled panel (TRIG_HEAD + padding). All deterministic.
 const PAD_V = 18, HEAD_H = 40, OPTS_H = 208, CARD_BASE = 80, SEP_EXTRA = 26, ADD_H = 38, EMPTY_H = 86, BUFFER = 8;
-const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 18, TRIG_MIN = 28;
+// Trigger panel when open contributes: TRIG_GAP (margin above) + TRIG_HEAD
+// (header 16 + gap 8 + border 2) + TRIG_PAD (panel padding 12+12) + the
+// growable textarea height. These MUST all be summed in sizeNode or the panel
+// clips off the bottom of the node.
+const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 24, TRIG_MIN = 28;
 // Strength range 0…2 (default 1.0 = normal, sits in the middle of the slider,
 // matching the Figma mockup). 0 = off, 2 = strongest.
 const SMIN = 0, SMAX = 2;
@@ -418,6 +422,9 @@ function injectStyle() {
   border-radius:4px; line-height:1; transition:background .12s, color .12s;}
 .lorabox .lb-ico:hover{background:var(--comfy-menu-bg,#333); color:#e6e6e6;}
 .lorabox .lb-ico.on{color:var(--lb-accent,#3b82f6);}
+/* the "extra params" plus rotates 45° into an × while its panel is open */
+.lorabox .lb-more svg{transition:transform .15s;}
+.lorabox .lb-more.on svg{transform:rotate(45deg);}
 .lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
 
 /* weight row(s): LABEL · slider(grows, blue fill) · value box */
@@ -555,8 +562,9 @@ const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.tog
 const svg = (inner, sz = 14) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 // a tag glyph for the trigger-words toggle (clearer than the old ⓘ)
 const TAG_SVG = svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/>');
-// the Figma card uses a bookmark glyph for the trigger toggle
-const BOOKMARK_SVG = svg('<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>');
+// a plus glyph — opens the row's extra parameters (trigger words); rotates to an
+// × when the panel is open (see .lb-more.on in the stylesheet)
+const PLUS_SVG = svg('<path d="M12 5v14M5 12h14"/>', 16);
 const X_SVG = svg('<path d="M18 6 6 18M6 6l12 12"/>');
 const GEAR_SVG = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 16);
 const SEARCH_SVG = svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 16);
@@ -1052,14 +1060,8 @@ app.registerExtension({
         nodeType.prototype.onDrawForeground = function (ctx) {
             onDrawForeground && onDrawForeground.apply(this, arguments);
             fitRootWidth(this);
-            drawBgSlice(this, ctx, "title");   // video/preview slice over the title bar
-        };
-
-        // body slice of the same source, drawn behind the slots and DOM panel
-        const onDrawBackground = nodeType.prototype.onDrawBackground;
-        nodeType.prototype.onDrawBackground = function (ctx) {
-            onDrawBackground && onDrawBackground.apply(this, arguments);
-            drawBgSlice(this, ctx, "body");
+            // (looping video / preview background removed — it animated and hurt
+            // the readability of the panel; the node now uses its flat dark chrome.)
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -1275,8 +1277,8 @@ function renderRows(node) {
         stop(field);
 
         const trig = document.createElement("button");
-        trig.className = "lb-ico" + (row._open ? " on" : ""); trig.innerHTML = BOOKMARK_SVG;
-        trig.title = "trigger words — the keywords this LoRA responds to";
+        trig.className = "lb-ico lb-more" + (row._open ? " on" : ""); trig.innerHTML = PLUS_SVG;
+        trig.title = "доп. параметры — триггер-слова этой LoRA";
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
         stop(trig);
 
@@ -1508,7 +1510,7 @@ function sizeNode(node) {
     const rows = node._lbRows;
     let listH;
     if (rows.length === 0) listH = EMPTY_H;
-    else listH = rows.reduce((a, r) => a + CARD_BASE + (r._open ? TRIG_GAP + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
+    else listH = rows.reduce((a, r) => a + CARD_BASE + (r._open ? TRIG_GAP + TRIG_HEAD + TRIG_PAD + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
     const optsH = node._lbOptsOpen ? OPTS_H + GAP : 0;
     node._lbContentH = PAD_V + HEAD_H + GAP + optsH + listH + GAP + ADD_H + BUFFER;
     // Only HEIGHT is ours; width is whatever the user set. Preserve width and
