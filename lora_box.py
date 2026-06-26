@@ -520,9 +520,11 @@ class LoraBox:
             # max/min clamp would silently turn NaN into 2.0 (full strength).
             if not (math.isfinite(sm) and math.isfinite(sc)):
                 continue
-            # allow negative ("anti-LoRA") and >1 weights, matching the UI range
-            sm = max(-3.0, min(3.0, sm))
-            sc = max(-3.0, min(3.0, sc))
+            # allow negative ("anti-LoRA") and >1 weights; the UI lets you type any
+            # value, so clamp only to a generous safety range (matches clampV in
+            # web/lora_box.js) instead of the slider's 0…2 visual range.
+            sm = max(-10.0, min(10.0, sm))
+            sc = max(-10.0, min(10.0, sc))
             if sm == 0.0 and sc == 0.0:
                 continue
             lora = self._get_lora(name)

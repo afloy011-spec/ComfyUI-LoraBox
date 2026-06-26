@@ -35,6 +35,12 @@ const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 24, TRIG_MIN = 28;
 // matching the Figma mockup). 0 = off, 2 = strongest.
 const SMIN = 0, SMAX = 2;
 const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
+// Manual entry in the value box is NOT bound to the slider's 0…2 range — you can
+// type any weight (negative "anti-LoRA", or >2 "overdrive"). The slider just pins
+// to its nearest end while the box keeps the real number. The backend clamps to
+// the same ±VMAX range, so what you type is what gets applied.
+const VMIN = -10, VMAX = 10;
+const clampV = (v) => Math.max(VMIN, Math.min(VMAX, isNaN(v) ? 1 : v));
 
 /* ---- looping video background (ported from the timur branch) -------------
  * The title bar is painted by litegraph AFTER onDrawBackground, so a single
@@ -422,9 +428,6 @@ function injectStyle() {
   border-radius:4px; line-height:1; transition:background .12s, color .12s;}
 .lorabox .lb-ico:hover{background:var(--comfy-menu-bg,#333); color:#e6e6e6;}
 .lorabox .lb-ico.on{color:var(--lb-accent,#3b82f6);}
-/* the "extra params" plus rotates 45° into an × while its panel is open */
-.lorabox .lb-more svg{transition:transform .15s;}
-.lorabox .lb-more.on svg{transform:rotate(45deg);}
 .lorabox .lb-del:hover{background:#5b2b2b; color:#fff;}
 
 /* weight row(s): LABEL · slider(grows, blue fill) · value box */
@@ -562,9 +565,10 @@ const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.tog
 const svg = (inner, sz = 14) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 // a tag glyph for the trigger-words toggle (clearer than the old ⓘ)
 const TAG_SVG = svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/>');
-// a plus glyph — opens the row's extra parameters (trigger words); rotates to an
-// × when the panel is open (see .lb-more.on in the stylesheet)
+// plus / minus glyphs for the row's "extra parameters" (trigger words) toggle —
+// minus while the panel is open (a rotated × would clash with the adjacent delete ×)
 const PLUS_SVG = svg('<path d="M12 5v14M5 12h14"/>', 16);
+const MINUS_SVG = svg('<path d="M5 12h14"/>', 16);
 const X_SVG = svg('<path d="M18 6 6 18M6 6l12 12"/>');
 const GEAR_SVG = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 16);
 const SEARCH_SVG = svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 16);
@@ -956,10 +960,10 @@ app.registerExtension({
             };
 
             const muteSw = mkSwitch(false, "Skip every LoRA and pass the prompt through untouched (state is preserved)",
-                (v) => { node._lbMute = v; applyMute(node); updateActiveCount(node); serialize(node); }, true);
+                (v) => { node._lbMute = v; applyMute(node); updateActiveCount(node); serialize(node); });
             node._lbMuteCb = muteSw._cb;
             const sepSw = mkSwitch(false, "Separate model and clip strengths per LoRA",
-                (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); }, true);
+                (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
             node._lbSepCb = sepSw._cb;
 
             const sec = document.createElement("div");
@@ -1188,7 +1192,7 @@ function initFromData(node) {
     node._lbRows = rows.map((r) => {
         const o = {
             on: r.on !== false, name: r.name || "None",
-            sm: clampS(r.sm != null ? r.sm : 1.0), sc: clampS(r.sc != null ? r.sc : 1.0),
+            sm: clampV(r.sm != null ? r.sm : 1.0), sc: clampV(r.sc != null ? r.sc : 1.0),
         };
         if (typeof r.trig === "string") o.trig = r.trig;
         return o;
@@ -1229,7 +1233,7 @@ function mkNum(val, title, onChange) {
     n.value = fmtNum(val); n.title = title;
     tintNum(n, val);
     n.onchange = () => {
-        const v = clampS(parseFloat(String(n.value).replace(",", ".")));
+        const v = clampV(parseFloat(String(n.value).replace(",", ".")));
         n.value = fmtNum(v); tintNum(n, v); onChange(v);
     };
     stop(n); eatWheel(n);
@@ -1277,7 +1281,7 @@ function renderRows(node) {
         stop(field);
 
         const trig = document.createElement("button");
-        trig.className = "lb-ico lb-more" + (row._open ? " on" : ""); trig.innerHTML = PLUS_SVG;
+        trig.className = "lb-ico lb-more" + (row._open ? " on" : ""); trig.innerHTML = row._open ? MINUS_SVG : PLUS_SVG;
         trig.title = "доп. параметры — триггер-слова этой LoRA";
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
         stop(trig);

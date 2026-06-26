@@ -50,8 +50,9 @@ the prompt automatically — no separate merge node needed. (If `prompt` is not
 connected, `prompt` output is just the trigger words; mute passes the prompt
 through untouched.)
 
-Strengths are clamped to `-3..3` (negative "anti-LoRA" weights allowed);
-non-finite values (NaN/Inf) are rejected.
+The strength slider covers the common `0..2` range, but the value box accepts
+any number you type: strengths are clamped to `-10..10` (negative "anti-LoRA"
+weights allowed); non-finite values (NaN/Inf) are rejected.
 
 ### Prompt + Triggers (Lora Box) (`LoraBoxPromptMerge`, category `loaders`)
 

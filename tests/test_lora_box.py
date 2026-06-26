@@ -92,9 +92,14 @@ class LoraBoxTest(unittest.TestCase):
         self.assertEqual(_APPLIED, [])
 
     def test_strength_clamped(self):
-        self._apply([{"on": True, "name": "a.safetensors", "sm": 5, "sc": -5}])
-        # sm clamps to 3.0; sc clamps to -3.0 (negative weights are allowed)
-        self.assertEqual(_APPLIED, [("a.safetensors", 3.0, -3.0)])
+        self._apply([{"on": True, "name": "a.safetensors", "sm": 15, "sc": -15}])
+        # manual entry is slider-independent; clamp only to the ±10 safety range
+        self.assertEqual(_APPLIED, [("a.safetensors", 10.0, -10.0)])
+
+    def test_strength_beyond_slider_passes_through(self):
+        # values outside the slider's 0…2 range but within ±10 apply verbatim
+        self._apply([{"on": True, "name": "a.safetensors", "sm": 5, "sc": -2.5}])
+        self.assertEqual(_APPLIED, [("a.safetensors", 5.0, -2.5)])
 
     def test_both_zero_skipped(self):
         self._apply([{"on": True, "name": "a.safetensors", "sm": 0, "sc": 0}])

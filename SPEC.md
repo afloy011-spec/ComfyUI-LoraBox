@@ -174,7 +174,7 @@ Trigger words are auto-read from metadata before rendering.
 - Applies LoRAs via `comfy.sd.load_lora_for_models`.
 - Caches loaded weights and parsed metadata keyed by file mtime.
 - `IS_CHANGED` hashes: row JSON, connected `prompt`, and mtime of each referenced LoRA.
-- Strength clamp: **−3 … 3**; NaN/Inf rejected.
+- Strength clamp: **−10 … 10** (manual entry is independent of the 0…2 slider); NaN/Inf rejected.
 
 ### HTTP routes
 
