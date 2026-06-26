@@ -600,10 +600,13 @@ const STRENGTH_TIP = "Strength: 0 = off, 1 = normal, up to 2 = stronger than tra
 
 /* ---- small floating text menu (thumbnail picture options) --------------- */
 let MENU = null;
+// Close on pointerdown, NOT mousedown: litegraph preventDefaults the canvas
+// pointerdown, which suppresses the compatibility mousedown — so a click on the
+// empty graph never fired the old mousedown handler and the menu stayed open.
 function onMenuDocDown(e) { if (MENU && !MENU.contains(e.target)) closeMenu(); }
 function closeMenu() {
     if (!MENU) return;
-    document.removeEventListener("mousedown", onMenuDocDown, true);
+    document.removeEventListener("pointerdown", onMenuDocDown, true);
     MENU.remove(); MENU = null;
 }
 // items: [{head}] section label, or {label, desc?, onPick} action
@@ -636,7 +639,7 @@ function openMenu(anchor, items) {
     m.style.left = Math.max(8, left) + "px";
     m.style.top = Math.max(8, top) + "px";
     MENU = m;
-    setTimeout(() => document.addEventListener("mousedown", onMenuDocDown, true), 0);
+    setTimeout(() => document.addEventListener("pointerdown", onMenuDocDown, true), 0);
 }
 
 /* Force the panel's root element to span the node's content width. The
@@ -716,7 +719,7 @@ function onWinWheel(e) { if (CUR_POP && !CUR_POP.contains(e.target)) closePop();
 function closePop() {
     if (!CUR_POP) return;
     const p = CUR_POP; CUR_POP = null;
-    document.removeEventListener("mousedown", onDocDown, true);
+    document.removeEventListener("pointerdown", onDocDown, true);
     window.removeEventListener("wheel", onWinWheel, true);
     if (p._anchor) p._anchor.classList.remove("open");
     p.remove();
@@ -777,8 +780,14 @@ async function openPicker(node, row, fieldEl) {
     const pop = document.createElement("div");
     pop.className = "lb-pop";
     pop._anchor = fieldEl;
+    // span from the field's left to the card's right edge so the popup covers the
+    // card's trailing +/×/value controls instead of leaving them peeking beside it
+    const card = fieldEl.closest(".lb-card");
+    const rightEdge = card ? card.getBoundingClientRect().right : rect.right;
+    let width = Math.max(rightEdge - rect.left, 220);
+    if (rect.left + width > window.innerWidth - 8) width = window.innerWidth - 8 - rect.left;
     pop.style.left = rect.left + "px";
-    pop.style.width = Math.max(rect.width, 220) + "px";
+    pop.style.width = width + "px";
     const below = window.innerHeight - rect.bottom;
     if (below < 220) pop.style.bottom = (window.innerHeight - rect.top + 4) + "px";
     else pop.style.top = (rect.bottom + 4) + "px";
@@ -889,7 +898,7 @@ async function openPicker(node, row, fieldEl) {
     draw("");
     setTimeout(() => {
         search.focus();
-        document.addEventListener("mousedown", onDocDown, true);
+        document.addEventListener("pointerdown", onDocDown, true);
         window.addEventListener("wheel", onWinWheel, true);
     }, 0);
 }
@@ -1533,7 +1542,15 @@ function sizeNode(node) {
         const cardBase = CARD_BASE + (node._lbSep ? SEP_EXTRA : 0);
         listH = rows.reduce((a, r) => a + cardBase + (r._open ? TRIG_GAP + TRIG_HEAD + TRIG_PAD + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
     }
-    const optsH = node._lbOptsOpen ? OPTS_H + GAP : 0;
+    // The options panel's hint wraps to a variable number of lines with width,
+    // so a fixed OPTS_H under-counts and shoves "+ Add LoRA" off the node. Measure
+    // the real panel height when it's open (it's in the DOM, display:'' ); fall
+    // back to the constant only if the measurement isn't available yet.
+    let optsH = 0;
+    if (node._lbOptsOpen) {
+        const measured = node._lbOpts ? node._lbOpts.offsetHeight : 0;
+        optsH = (measured > 0 ? measured : OPTS_H) + GAP;
+    }
     node._lbContentH = PAD_V + HEAD_H + GAP + optsH + listH + GAP + ADD_H + BUFFER;
     // Only HEIGHT is ours; width is whatever the user set. Preserve width and
     // let computeSize derive height from getMinHeight/getMaxHeight — so value
