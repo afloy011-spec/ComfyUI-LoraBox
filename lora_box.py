@@ -14,6 +14,7 @@ This node parses that JSON and applies each enabled LoRA.
 """
 
 import os
+import re
 import json
 import math
 import struct
@@ -127,6 +128,62 @@ def _sidecar_triggers(path):
     return []
 
 
+def _tags_from_frequency(meta):
+    """Activation tokens from ss_tag_frequency, used only when no explicit
+    trigger field exists.
+
+    Kohya / AI-Toolkit record every caption tag with the number of images it
+    appeared in. The words deliberately added to EVERY caption — the trigger /
+    activation tokens — therefore have the highest count, while descriptive
+    dataset tags trail off. We surface only the tokens present in *every* image
+    (count == max), so we recover the real triggers (e.g. "vokiai", "ami") and
+    NOT the long tail of dataset tags. Guarded: a one-shot set (max < 2) or a
+    set where almost everything is ubiquitous gives no reliable signal.
+    """
+    freq = meta.get("ss_tag_frequency")
+    if isinstance(freq, str):
+        try:
+            freq = json.loads(freq)
+        except Exception:
+            return []
+    if not isinstance(freq, dict):
+        return []
+    counts = {}
+    folders = []
+    for subset_name, subset in freq.items():
+        # Kohya dataset folders are named "<repeats>_<trigger>" (e.g. "1_katosik");
+        # the part after the leading "<n>_" is a strong, common trigger signal.
+        tok = re.sub(r"^\d+_", "", str(subset_name).strip()).replace("_", " ").strip()
+        if len(tok) >= 3:
+            folders.append(tok)
+        if not isinstance(subset, dict):
+            continue
+        for tag, c in subset.items():
+            try:
+                c = int(c)
+            except (TypeError, ValueError):
+                continue
+            t = str(tag).strip()
+            if t:
+                counts[t] = counts.get(t, 0) + c
+    # Primary: activation tokens are the tags present in (essentially) every
+    # image — i.e. count == max. Only trust the histogram for a real multi-image
+    # set (max >= 2); a one-shot caption set is too noisy to rank.
+    if counts:
+        maxc = max(counts.values())
+        if maxc >= 2:
+            hits = sorted((t for t, c in counts.items() if c == maxc), key=lambda t: t.lower())
+            if len(hits) <= 12:
+                return hits[:10]
+    # Fallback: the Kohya folder trigger (recovers "katosik" from "1_katosik"
+    # even when its tag count is 1).
+    out = []
+    for ft in folders:
+        if ft.lower() not in (o.lower() for o in out):
+            out.append(ft)
+    return out[:10]
+
+
 def trigger_words_for(name):
     path = _safe_lora_path(name)
     if not path:
@@ -134,19 +191,22 @@ def trigger_words_for(name):
     meta = _read_st_metadata(path)
     words = []
 
-    # Only real trigger fields written by trainers / civitai exports. We do
-    # NOT fall back to the most frequent training tags (ss_tag_frequency): those
-    # are dataset tags, not trigger words, and silently injecting them adds
-    # noise to the prompt the user never asked for.
+    # 1) explicit trigger fields written by trainers / civitai exports (best).
     for k in ("modelspec.trigger_phrase", "trigger_phrase", "ss_trigger_words",
               "activation text", "trainedWords"):
         v = meta.get(k)
         if isinstance(v, str) and v.strip():
             words.extend([w.strip() for w in v.split(",") if w.strip()])
 
-    # Supplement empty/partial header metadata with a sidecar file, if present.
+    # 2) a sidecar file next to the lora (Civitai-helper style).
     if not words:
         words.extend(_sidecar_triggers(path))
+
+    # 3) last resort: the always-present tokens from ss_tag_frequency. Many
+    # loras carry no explicit trigger field but DO have the tag histogram, and
+    # the activation token is the one present in every image.
+    if not words:
+        words.extend(_tags_from_frequency(meta))
 
     seen, out = set(), []
     for w in words:

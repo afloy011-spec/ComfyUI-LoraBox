@@ -169,6 +169,38 @@ class LoraBoxTest(unittest.TestCase):
         self.assertEqual(lora_box.trigger_words_for("c.safetensors"),
                          ["myloratoken", "anime style"])
 
+    def test_tag_frequency_fallback(self):
+        # no explicit trigger field, but ss_tag_frequency has activation tokens
+        # present in every image (count == max) plus descriptive tail tags
+        b = os.path.join(self.tmp, "d.safetensors")
+        _make_safetensors(b, {"ss_tag_frequency": json.dumps(
+            {"set1": {"vokiai": 29, "ami": 29, "blonde hair": 5, "smiling": 1}})})
+        _LORAS["d.safetensors"] = b
+        self.assertEqual(lora_box.trigger_words_for("d.safetensors"), ["ami", "vokiai"])
+
+    def test_tag_frequency_kohya_folder_trigger(self):
+        # one-shot set: the trigger is recovered from the Kohya "<n>_<trigger>"
+        # folder name even though its tag count is 1
+        b = os.path.join(self.tmp, "k.safetensors")
+        _make_safetensors(b, {"ss_tag_frequency": json.dumps({"1_katosik": {"katosik": 1}})})
+        _LORAS["k.safetensors"] = b
+        self.assertEqual(lora_box.trigger_words_for("k.safetensors"), ["katosik"])
+
+    def test_tag_frequency_single_image_ignored(self):
+        # a one-shot set (everything count 1) gives no reliable trigger signal
+        b = os.path.join(self.tmp, "e.safetensors")
+        _make_safetensors(b, {"ss_tag_frequency": json.dumps(
+            {"s": {"a": 1, "b": 1, "c": 1}})})
+        _LORAS["e.safetensors"] = b
+        self.assertEqual(lora_box.trigger_words_for("e.safetensors"), [])
+
+    def test_explicit_trigger_wins_over_tag_frequency(self):
+        b = os.path.join(self.tmp, "f.safetensors")
+        _make_safetensors(b, {"trigger_phrase": "realtoken",
+                              "ss_tag_frequency": json.dumps({"s": {"noise": 9, "more": 9}})})
+        _LORAS["f.safetensors"] = b
+        self.assertEqual(lora_box.trigger_words_for("f.safetensors"), ["realtoken"])
+
     def test_header_metadata_wins_over_sidecar(self):
         # the safetensors trigger field is authoritative; sidecar only fills gaps
         with open(os.path.join(self.tmp, "a.txt"), "w", encoding="utf-8") as f:
