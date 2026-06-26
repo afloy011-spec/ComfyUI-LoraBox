@@ -436,7 +436,10 @@ function injectStyle() {
 /* weight row(s): LABEL · slider(grows, blue fill) · value box */
 .lorabox .lb-wrow{display:grid; grid-template-columns:auto minmax(0,1fr) 46px; gap:8px;
   align-items:center; min-width:0; height:20px;}
-.lorabox .lb-card.lb-sep .lb-wlbl{min-width:58px;}
+/* sep mode: pin the label column to a fixed width so the MODEL & CLIP sliders
+   start at the exact same x (auto-width labels made the two tracks look skewed) */
+.lorabox .lb-card.lb-sep .lb-wrow{grid-template-columns:78px minmax(0,1fr) 46px;}
+.lorabox .lb-card.lb-sep .lb-wlbl{overflow:hidden; text-overflow:ellipsis;}
 .lorabox .lb-wlbl{font-size:9px; letter-spacing:.04em; text-transform:uppercase; color:#555; white-space:nowrap;}
 .lorabox .lb-slider{-webkit-appearance:none; appearance:none; width:100%; min-width:36px; height:4px;
   border-radius:2px; background:#2a2a2a; outline:none; cursor:pointer;}
@@ -1524,7 +1527,12 @@ function sizeNode(node) {
     const rows = node._lbRows;
     let listH;
     if (rows.length === 0) listH = EMPTY_H;
-    else listH = rows.reduce((a, r) => a + CARD_BASE + (r._open ? TRIG_GAP + TRIG_HEAD + TRIG_PAD + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
+    // Model+Clip mode gives every card a second (CLIP) weight row — SEP_EXTRA —
+    // or the bottom card clips off the node.
+    else {
+        const cardBase = CARD_BASE + (node._lbSep ? SEP_EXTRA : 0);
+        listH = rows.reduce((a, r) => a + cardBase + (r._open ? TRIG_GAP + TRIG_HEAD + TRIG_PAD + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
+    }
     const optsH = node._lbOptsOpen ? OPTS_H + GAP : 0;
     node._lbContentH = PAD_V + HEAD_H + GAP + optsH + listH + GAP + ADD_H + BUFFER;
     // Only HEIGHT is ours; width is whatever the user set. Preserve width and
