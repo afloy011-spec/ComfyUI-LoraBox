@@ -508,7 +508,6 @@ function injectStyle() {
 .lorabox .lb-empty{animation:lb-fade .25s ease;}
 .lorabox .lb-count{transition:background .15s, color .15s;}
 .lorabox .lb-ico:active,.lorabox .lb-gear:active{transform:scale(.88);}
-.lorabox .lb-add:hover{box-shadow:0 2px 10px color-mix(in srgb,var(--lb-accent,#3b82f6) 18%,transparent);}
 .lorabox .lb-name:focus-visible,.lorabox .lb-thumb:focus-visible,
 .lorabox .lb-ico:focus-visible,.lorabox .lb-gear:focus-visible{outline:2px solid var(--lb-accent,#3b82f6); outline-offset:1px;}
 `;
