@@ -424,13 +424,17 @@ function injectStyle() {
   background:var(--comfy-menu-bg,#1c1c1c); border:1px solid var(--border-color,var(--lb-border,#2e2e2e));
   box-shadow:0 10px 30px rgba(0,0,0,.5); font-family:sans-serif; font-size:11.5px;
   line-height:1.35; box-sizing:border-box;}
-.lb-pop-search-wrap{position:relative; flex:0 0 auto;}
-.lb-pop-search-wrap .ic{position:absolute; left:9px; top:50%; transform:translateY(-50%);
-  color:#888; pointer-events:none; display:flex;}
-.lb-pop-search{width:100%; height:28px; padding:0 9px 0 29px; font-size:11.5px; border-radius:6px; outline:none;
-  background:var(--comfy-input-bg,var(--lb-field,#0d0d0d)); color:var(--input-text,#eee);
-  border:1px solid var(--border-color,var(--lb-border,#2e2e2e)); box-sizing:border-box;}
-.lb-pop-search:focus{border-color:var(--lb-accent,#3b82f6);}
+/* search row: icon and input are flex siblings (with a gap) so they can never
+   overlap; the border/background live on the wrap, the input is transparent. */
+.lb-pop-search-wrap{flex:0 0 auto; display:flex; align-items:center; gap:8px; height:30px; padding:0 10px;
+  border-radius:6px; box-sizing:border-box;
+  background:var(--comfy-input-bg,var(--lb-field,#0d0d0d));
+  border:1px solid var(--border-color,var(--lb-border,#2e2e2e));}
+.lb-pop-search-wrap:focus-within{border-color:var(--lb-accent,#3b82f6);}
+.lb-pop-search-wrap .ic{flex:0 0 auto; width:16px; height:16px; color:#888; pointer-events:none; display:flex;}
+.lb-pop-search-wrap .ic svg{display:block;}
+.lb-pop-search{flex:1 1 auto; min-width:0; height:100%; padding:0; font-size:11.5px; outline:none;
+  background:transparent; color:var(--input-text,#eee); border:none; box-sizing:border-box;}
 .lb-pop-list{flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto;
   overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
 .lb-pop-none{padding:5px 9px; font-size:11.5px; font-style:italic; color:#888; cursor:pointer; border-radius:5px;}
