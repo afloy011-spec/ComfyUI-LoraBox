@@ -44,6 +44,11 @@ offering a one-row-per-LoRA design.
 | `prompt` | STRING | optional input; if connected, returns it with trigger words merged in |
 | `data`  | STRING | hidden; JSON kept in sync by the panel |
 
+You can also type the positive prompt **directly in the node** (a Prompt box in
+the panel); it's stored in `data`, so it serializes reliably and needs no
+external prompt node. A connected `prompt` input takes precedence when it carries
+text; otherwise the in-node Prompt box is used.
+
 Outputs: `MODEL`, `CLIP`, `prompt` (STRING — the prompt with trigger words
 merged in).
 

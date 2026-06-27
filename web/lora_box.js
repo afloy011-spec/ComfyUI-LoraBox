@@ -31,6 +31,9 @@ const PAD_V = 18, HEAD_H = 40, OPTS_H = 208, CARD_BASE = 80, SEP_EXTRA = 26, ADD
 // growable textarea height. These MUST all be summed in sizeNode or the panel
 // clips off the bottom of the node.
 const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 24, TRIG_MIN = 28;
+// In-node prompt field: min textarea height; the wrap is measured in sizeNode
+// (with PROMPT_FALLBACK if measurement isn't ready yet).
+const PROMPT_MIN = 40, PROMPT_FALLBACK = 78;
 // Strength range 0…2 (default 1.0 = normal, sits in the middle of the slider,
 // matching the Figma mockup). 0 = off, 2 = strongest.
 const SMIN = 0, SMAX = 2;
@@ -399,6 +402,15 @@ function injectStyle() {
   outline:none; font-family:inherit;}
 .lorabox .lb-trig-in:focus{border-color:var(--lb-accent,#3b82f6);}
 .lorabox .lb-trig-in::placeholder{color:#667;}
+
+/* in-node prompt field — type the positive prompt right in the node */
+.lorabox .lb-prompt{display:flex; flex-direction:column; gap:6px;}
+.lorabox .lb-prompt-lbl{font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:#6a6a6a;}
+.lorabox .lb-prompt-in{width:100%; min-height:${PROMPT_MIN}px; padding:8px 10px; resize:none; overflow:hidden;
+  background:var(--lb-field,#0d0d0d); color:#e8e8e8; border:1px solid var(--border-color,var(--lb-border,#2e2e2e));
+  border-radius:8px; font-size:12px; line-height:1.45; outline:none; font-family:inherit;}
+.lorabox .lb-prompt-in:focus{border-color:var(--lb-accent,#3b82f6);}
+.lorabox .lb-prompt-in::placeholder{color:#5f5f5f;}
 
 /* add button — dashed outline, calm */
 .lorabox .lb-add{height:36px; width:100%; display:flex; align-items:center; justify-content:center; gap:6px;
@@ -937,6 +949,7 @@ app.registerExtension({
             node._lbMute = false;
             node._lbPos = "beginning";
             node._lbDelim = ", ";
+            node._lbPrompt = "";
             node._lbOptsOpen = false;
             node._lbContentH = 150;
 
@@ -973,6 +986,29 @@ app.registerExtension({
             actions.append(count, gear);
             head.append(title, actions);
             inner.appendChild(head);
+
+            // ---- prompt field (typed in-node; stored in data so it serializes
+            // reliably — robust to the UI's graph→prompt conversion. The
+            // connected `prompt` input still wins when wired & non-empty.) ----
+            const promptWrap = document.createElement("div");
+            promptWrap.className = "lb-prompt";
+            node._lbPromptWrap = promptWrap;
+            const pLbl = document.createElement("div");
+            pLbl.className = "lb-prompt-lbl"; pLbl.textContent = "Prompt";
+            const pTa = document.createElement("textarea");
+            pTa.className = "lb-prompt-in"; pTa.rows = 2;
+            pTa.placeholder = "positive prompt — trigger words are added automatically…";
+            node._lbPromptIn = pTa;
+            const growPrompt = () => {
+                pTa.style.height = "auto";
+                pTa.style.height = Math.max(PROMPT_MIN, pTa.scrollHeight) + "px";
+                sizeNode(node);
+            };
+            node._lbGrowPrompt = growPrompt;
+            pTa.oninput = () => { node._lbPrompt = pTa.value; serialize(node); growPrompt(); };
+            stop(pTa); eatWheel(pTa);
+            promptWrap.append(pLbl, pTa);
+            inner.appendChild(promptWrap);
 
             // ---- options disclosure (mute / model+clip / trigger merge) ----
             const opts = document.createElement("div");
@@ -1210,11 +1246,12 @@ function initFromData(node) {
     node._lbDataW = dataW;
     let parsed = [];
     try { parsed = JSON.parse(dataW?.value || "[]"); } catch (e) { parsed = []; }
-    let rows = parsed, mute = false, pos = "beginning", delim = ", ";
+    let rows = parsed, mute = false, pos = "beginning", delim = ", ", promptText = "";
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
         mute = !!parsed.mute;
         if (typeof parsed.pos === "string") pos = parsed.pos;
         if (typeof parsed.delim === "string") delim = parsed.delim;
+        if (typeof parsed.prompt === "string") promptText = parsed.prompt;
         rows = Array.isArray(parsed.rows) ? parsed.rows : [];
     }
     if (!Array.isArray(rows)) rows = [];
@@ -1231,6 +1268,11 @@ function initFromData(node) {
     node._lbMute = mute;
     node._lbPos = pos;
     node._lbDelim = delim;
+    node._lbPrompt = promptText;
+    if (node._lbPromptIn) {
+        node._lbPromptIn.value = promptText;
+        if (node._lbGrowPrompt) requestAnimationFrame(node._lbGrowPrompt);
+    }
     if (node._lbSepCb) node._lbSepCb.checked = node._lbSep;
     // Restore the saved "mute all" state so a muted-saved workflow reopens muted
     // AND shows the toggle on (was reset to false → LoRAs silently un-applied).
@@ -1251,6 +1293,7 @@ function serialize(node) {
         v: 1, mute: !!node._lbMute,
         pos: node._lbPos || "end",
         delim: node._lbDelim != null ? node._lbDelim : ", ",
+        prompt: node._lbPrompt || "",
         rows,
     });
 }
@@ -1567,7 +1610,14 @@ function sizeNode(node) {
         const measured = node._lbOpts ? node._lbOpts.offsetHeight : 0;
         optsH = (measured > 0 ? measured : OPTS_H) + GAP;
     }
-    node._lbContentH = PAD_V + HEAD_H + GAP + optsH + listH + GAP + ADD_H + BUFFER;
+    // The in-node prompt field (label + auto-growing textarea) is measured the
+    // same way; fall back to a constant until the DOM has laid it out.
+    let promptH = 0;
+    if (node._lbPromptWrap) {
+        const measured = node._lbPromptWrap.offsetHeight;
+        promptH = (measured > 0 ? measured : PROMPT_FALLBACK) + GAP;
+    }
+    node._lbContentH = PAD_V + HEAD_H + GAP + promptH + optsH + listH + GAP + ADD_H + BUFFER;
     // Only HEIGHT is ours; width is whatever the user set. Preserve width and
     // let computeSize derive height from getMinHeight/getMaxHeight — so value
     // changes can't collapse the node and the user can still resize it.

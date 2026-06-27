@@ -733,10 +733,18 @@ class LoraBox:
         else:
             rows = []
 
+        # The positive prompt can arrive on the connected `prompt` input OR be
+        # typed into the node's own panel (stored in data as "prompt"). The
+        # connected input wins when it carries text; otherwise we fall back to the
+        # panel value — so the node still works when the UI's graph→prompt
+        # conversion drops a primitive feeding the prompt socket.
+        panel_prompt = obj.get("prompt") if isinstance(obj, dict) else None
+        eff_prompt = prompt if (isinstance(prompt, str) and prompt.strip()) else (panel_prompt or "")
+
         if muted:
             # Muted: no LoRA applied, no triggers — pass the prompt through
             # untouched so a connected prompt still reaches the encoder.
-            return (model, clip, (prompt or ""))
+            return (model, clip, eff_prompt)
 
         applied, triggers = [], []
         for row in rows:
@@ -784,7 +792,7 @@ class LoraBox:
                 seen.add(w.lower())
                 words.append(w)
         tw = ", ".join(words)
-        merged = merge_prompt(prompt, tw, pos, delim)
+        merged = merge_prompt(eff_prompt, tw, pos, delim)
         return (model, clip, merged)
 
 

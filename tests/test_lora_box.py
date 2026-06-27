@@ -231,6 +231,27 @@ class LoraBoxTest(unittest.TestCase):
                                    prompt="p", pos="end", delim=" BREAK ")
         self.assertEqual(merged, "p BREAK alpha, beta")
 
+    def test_panel_prompt_used_when_input_empty(self):
+        # prompt typed into the node's panel (stored in data) is used when the
+        # connected prompt input is empty/absent
+        data = json.dumps({"v": 1, "pos": "end", "prompt": "a sunny beach",
+                           "rows": [{"on": True, "name": "a.safetensors", "sm": 1.0}]})
+        m, c, merged = self.node.apply([], [], prompt=None, data=data)
+        self.assertEqual(merged, "a sunny beach, alpha, beta")
+
+    def test_connected_prompt_overrides_panel(self):
+        # a non-empty connected prompt wins over the panel value
+        data = json.dumps({"v": 1, "pos": "end", "prompt": "panel text",
+                           "rows": [{"on": True, "name": "a.safetensors", "sm": 1.0}]})
+        m, c, merged = self.node.apply([], [], prompt="input wins", data=data)
+        self.assertEqual(merged, "input wins, alpha, beta")
+
+    def test_panel_prompt_passthrough_when_muted(self):
+        data = json.dumps({"v": 1, "mute": True, "prompt": "kept verbatim",
+                           "rows": [{"on": True, "name": "a.safetensors", "sm": 1.0}]})
+        m, c, merged = self.node.apply([], [], prompt=None, data=data)
+        self.assertEqual(merged, "kept verbatim")
+
     def test_metadata_cache_hit(self):
         lora_box.trigger_words_for("a.safetensors")
         self.assertIn(self.a, lora_box._META_CACHE)

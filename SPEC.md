@@ -45,6 +45,7 @@ Lora Box (model/clip out) ──►  rest of pipeline
 
 - **HTML DOM panel** inside the node; height is computed deterministically; width follows the node.
 - **Header:** title + live **active count** (e.g. `3 active`, or `muted`).
+- **Prompt box** — the positive prompt can be typed in-node; stored in `data` (so it serializes reliably with no external node). The connected `prompt` input wins when it carries text, else this is used.
 - **⚙ Settings** (disclosure — secondary controls hidden by default):
   - **Mute all** — skip LoRA application; pass `prompt` through unchanged; per-row on/off states are preserved in `data` across workflow save/load.
   - **Model + clip** — separate strength sliders for model vs clip.
