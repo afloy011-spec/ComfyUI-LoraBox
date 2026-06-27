@@ -216,7 +216,7 @@ def trigger_words_for(name):
     return out[:50]
 
 
-LORA_CATEGORIES = ("Z-Image", "Flux", "Krea", "LTX Video", "Other")
+LORA_CATEGORIES = ("Z-Image", "Flux", "Krea", "SDXL", "SD1.5", "LTX Video", "Other")
 
 
 def _category_from_name(name):
@@ -226,10 +226,14 @@ def _category_from_name(name):
         return "Z-Image"
     if "ltx" in low:
         return "LTX Video"
-    if "flux" in low:
-        return "Flux"
     if "krea" in low:
         return "Krea"
+    if "flux" in low:
+        return "Flux"
+    if any(x in low for x in ("sdxl", "sd-xl", "sd_xl", "-xl", "_xl", "xl-", "xl_")):
+        return "SDXL"
+    if any(x in low for x in ("sd15", "sd1.5", "sd-1.5", "sd_15", "sd_1.5", "v1-5", "v1.5")):
+        return "SD1.5"
     return "Other"
 
 
@@ -245,17 +249,50 @@ def _category_from_meta(meta):
         return "Z-Image"
     if "ltx" in hints:
         return "LTX Video"
-    if "flux" in hints:
-        return "Flux"
     if "krea" in hints:
         return "Krea"
+    if "flux" in hints:
+        return "Flux"
+    if any(x in hints for x in ("sdxl", "sd-xl", "sd_xl", "stable-diffusion-xl",
+                                "stable_diffusion_xl", "xl-base", "xl_base")):
+        return "SDXL"
+    if any(x in hints for x in ("sd15", "sd1.5", "sd-1.5", "sd_1.5", "v1-5", "v1.5",
+                                "stable-diffusion-v1", "sd_v1", "runwayml")):
+        return "SD1.5"
     return "Other"
 
 
-def category_for(name):
-    """Category for picker grouping: filename first, then metadata."""
-    if not name or name == "None":
-        return None
+# ---- user category overrides ---------------------------------------------
+# A user can move a lora into a different (or brand-new) picker group; the
+# choice is stored by lora name in a small JSON next to the node so it persists
+# and is shared by every Lora Box. Auto-detection is the fallback.
+_USERCATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_categories.json")
+_USERCATS = None
+MAX_CAT_LEN = 40
+
+
+def _load_usercats():
+    global _USERCATS
+    if _USERCATS is None:
+        try:
+            with open(_USERCATS_PATH, encoding="utf-8") as f:
+                d = json.load(f)
+            ov = d.get("overrides") if isinstance(d, dict) else None
+            _USERCATS = {k: str(v)[:MAX_CAT_LEN] for k, v in ov.items()} if isinstance(ov, dict) else {}
+        except Exception:
+            _USERCATS = {}
+    return _USERCATS
+
+
+def _save_usercats():
+    try:
+        with open(_USERCATS_PATH, "w", encoding="utf-8") as f:
+            json.dump({"overrides": _USERCATS}, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        log.warning("could not save user_categories.json: %s", e)
+
+
+def _auto_category(name):
     cat = _category_from_name(name)
     if cat != "Other":
         return cat
@@ -263,6 +300,16 @@ def category_for(name):
     if not path:
         return "Other"
     return _category_from_meta(_read_st_metadata(path))
+
+
+def category_for(name):
+    """Category for picker grouping: user override first, then auto-detection."""
+    if not name or name == "None":
+        return None
+    ov = _load_usercats().get(name)
+    if ov:
+        return ov
+    return _auto_category(name)
 
 
 def _word_in_text(word, text):
@@ -486,6 +533,29 @@ try:
             if name and name != "None":
                 cats[name] = category_for(name)
         return web.json_response({"categories": cats})
+
+    @PromptServer.instance.routes.get("/lorabox/usercats")
+    async def _lorabox_usercats_get(request):
+        return web.json_response({"overrides": dict(_load_usercats())})
+
+    @PromptServer.instance.routes.post("/lorabox/usercats")
+    async def _lorabox_usercats_post(request):
+        """Set (or clear, when group is empty) a lora's custom picker group."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "bad json"}, status=400)
+        name = body.get("name", "")
+        if not _safe_lora_path(name):           # only real registered loras
+            return web.json_response({"ok": False, "error": "unknown lora"}, status=400)
+        group = str(body.get("group", "") or "").strip()[:MAX_CAT_LEN]
+        cats = _load_usercats()
+        if group:
+            cats[name] = group
+        else:
+            cats.pop(name, None)                # empty -> revert to auto-detect
+        _save_usercats()
+        return web.json_response({"ok": True, "name": name, "group": group or category_for(name)})
 
     @PromptServer.instance.routes.get("/lorabox/preview")
     async def _lorabox_preview_get(request):

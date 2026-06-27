@@ -82,9 +82,10 @@ Floating searchable dropdown attached to the name field.
 | Feature | Detail |
 |---------|--------|
 | Search | Filter by substring (case-insensitive) |
-| Groups | **Z-Image**, **Flux**, **Krea**, **LTX Video**, **Other** |
+| Groups | **Z-Image**, **Flux**, **Krea**, **SDXL**, **SD1.5**, **LTX Video**, **Other** (+ any custom groups) |
 | Group detection | Filename heuristics first; if inconclusive, read **safetensors metadata** (`ss_base_model_version`, `modelspec.architecture`, etc.) |
-| Sort | Alphabetical within each group |
+| Custom groups | **Right-click** a lora → move to a built-in/existing/new group, or revert to auto. Stored by lora name in `user_categories.json` (persists, shared across every Lora Box). |
+| Sort | Built-in groups in fixed order, custom groups alphabetically before **Other**; alphabetical within each group |
 | Keyboard | ↑↓ navigate, Enter select, Escape close |
 | UX | Exactly **one** picker open at a time; scrollable list; closes on outside click |
 
@@ -148,26 +149,34 @@ Once set, the thumbnail appears in **every** Lora Box and workflow that referenc
 
 ### Generate preview (canonical test)
 
-Headless Z-Image Turbo render via ComfyUI queue:
+Headless render via the ComfyUI queue, using the **engine for the LoRA's
+architecture** (chosen from its detected category):
 
-| Parameter | Value |
-|-----------|-------|
-| Seed | Fixed (same for all LoRAs — comparable thumbnails) |
-| Steps / CFG | 8 / 1.0 |
-| Output size | 1024×1024 → saved as ~512px PNG sidecar |
+| Engine | Used for | Graph (loaders → sampler) |
+|--------|----------|----------------------------|
+| **Z-Image** | Z-Image (+ unrecognised, by default) | UNet + CLIP(lumina2) + VAE, AuraFlow shift, euler/simple, 8 steps, cfg 1.0 |
+| **Flux** | Flux, Krea | UNet + dual CLIP + VAE, FluxGuidance, euler/simple, 20 steps, cfg 1.0 |
+| **SDXL** | SDXL | Checkpoint, dpmpp_2m/karras, 25 steps, cfg 7.0, 1024² |
+| **SD1.5** | SD1.5 | Checkpoint, dpmpp_2m/karras, 25 steps, cfg 7.0, 512² |
+
+Shared across engines: a **fixed seed** (comparable thumbnails), output resized
+to a ~512px PNG sidecar, and two **kinds** —
 
 | Kind | Base prompt | Trigger position |
 |------|-------------|------------------|
 | **Character** | portrait, soft daylight, neutral background… | triggers at **start** |
-| **Style** | woman reading in a cafe, everyday scene… | triggers at **end** |
+| **Style** | woman reading in a cafe, everyday scene… | triggers at **start** |
 
 Trigger words are auto-read from metadata before rendering.
 
-The three model files are configurable (`preview_config.json` next to the node,
-or the `LORABOX_PREVIEW_UNET` / `_CLIP` / `_VAE` env vars) and resolved leniently
-against the installed list. If they can't be found, Generate fails with an
-explicit "models not installed" message; **Upload / drag-and-drop still work**, so
-the feature degrades gracefully on any setup.
+Each engine's models are configurable — `preview_config.json` (Z-Image flat
+keys; other engines under a `flux`/`sdxl`/`sd15` section) or env vars
+(`LORABOX_PREVIEW_UNET/_CLIP/_VAE`, or `LORABOX_PREVIEW_<ENGINE>_<KEY>`) — and
+resolved leniently against the installed list. Force an engine with
+`LORABOX_PREVIEW_ENGINE`, set the unrecognised-LoRA fallback with
+`LORABOX_PREVIEW_DEFAULT_ENGINE`. If models can't be found, Generate fails with
+an explicit "aren't installed" message naming the engine; **Upload /
+drag-and-drop still work**, so the feature degrades gracefully on any setup.
 
 ---
 
@@ -192,11 +201,13 @@ event loop.
 | Method | Route | Purpose |
 |--------|-------|---------|
 | GET | `/lorabox/triggers?file=` | Trigger words for one LoRA |
-| GET | `/lorabox/categories` | `{ name → group }` for all LoRAs |
+| GET | `/lorabox/categories` | `{ name → group }` for all LoRAs (incl. user overrides) |
+| GET | `/lorabox/usercats` | `{ overrides: { name → group } }` (custom picker groups) |
+| POST | `/lorabox/usercats` | Set/clear a lora's custom group (`{name, group}`; empty group = revert to auto) |
 | GET | `/lorabox/preview?file=` | Serve preview image bytes |
 | POST | `/lorabox/preview?file=&ext=` | Upload sidecar (≤ 8 MB) |
 | DELETE | `/lorabox/preview?file=` | Remove sidecar |
-| POST | `/lorabox/preview/generate?file=&kind=` | Generate canonical preview |
+| POST | `/lorabox/preview/generate?file=&kind=` | Generate canonical preview (engine by architecture) |
 
 ---
 
@@ -227,9 +238,10 @@ event loop.
 - Batch **Generate preview for all** LoRAs in the list.
 - Import preview from AI Toolkit training samples folder.
 - **Use last workflow output** as preview with one click.
-- User-defined categories / tags.
-- Civitai cover image fetch by model hash.
-- Picker: custom group labels (e.g. rename "Krea" → "Create").
+- More render engines for Generate (e.g. SD3, LTX still-frame).
+
+> Done since v1: cross-architecture Generate (Z-Image/Flux/SDXL/SD1.5),
+> user-defined picker categories, and Civitai cover fetch by hash (opt-in).
 
 ---
 

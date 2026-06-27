@@ -25,9 +25,13 @@ offering a one-row-per-LoRA design.
   Civitai / model managers) loads **automatically**; otherwise an empty
   thumbnail offers **✨ Generate** (a quick test render — pick *Character* or
   *Style* so style LoRAs get a scene, not a portrait) or **＋ Add** (your own
-  image, click or drag & drop). Hover an image for the enlarge + regenerate /
+  image, click or drag & drop). Generate **matches the LoRA's architecture**
+  (Z-Image / Flux / SDXL / SD1.5). Hover an image for the enlarge + regenerate /
   replace / remove chips. A custom image is stored as a sidecar next to the
   `.safetensors`, so it *belongs to the LoRA* and shows in every Lora Box.
+- **Architecture-grouped picker**: loras are grouped (Z-Image, Flux, Krea, SDXL,
+  SD1.5, …); **right-click** one to assign a custom group — it sticks across
+  every Lora Box.
 
 ## Node
 
@@ -90,22 +94,40 @@ that reach outside the node.
 
 ### Preview generation (`✨ Generate`)
 
-The built-in **Generate** renders a quick **Z-Image Turbo** test image and saves
-it as the LoRA's sidecar. It needs three models installed: a UNet/diffusion
-model, a CLIP/text-encoder and a VAE (defaults: `z_image_turbo_bf16.safetensors`,
-`qwen_3_4b.safetensors`, `ae.safetensors`).
+The built-in **Generate** renders a quick test image and saves it as the LoRA's
+sidecar. It picks a render **engine from the LoRA's detected architecture** —
+**Z-Image**, **Flux** (also used for Krea), **SDXL** or **SD1.5** — so each LoRA
+renders with the right graph, with a shared seed so thumbnails stay comparable.
 
-If those aren't present, Generate reports exactly what's missing instead of
-failing cryptically — and **Upload / drag-and-drop** (and the automatic
+Each engine needs its own models installed (Z-Image: UNet + CLIP + VAE; Flux:
+UNet + dual CLIP + VAE; SDXL/SD1.5: a checkpoint). If they aren't present,
+Generate reports exactly what's missing for that engine instead of failing
+cryptically — and **Upload / drag-and-drop** (and the automatic
 `<lora>.preview.png` sidecar) work regardless, so every LoRA can still get a
-picture. To point Generate at your own models either:
+picture.
 
-- drop a `preview_config.json` next to the node (any of the keys in
-  `PREVIEW_CONFIG` — e.g. `{ "unet_name": "...", "clip_name": "...", "vae_name": "..." }`), or
-- set the env vars `LORABOX_PREVIEW_UNET`, `LORABOX_PREVIEW_CLIP`, `LORABOX_PREVIEW_VAE`.
+To point an engine at your own models either:
+
+- drop a `preview_config.json` next to the node — the Z-Image engine reads flat
+  keys (`{ "unet_name": "...", "clip_name": "...", "vae_name": "..." }`), other
+  engines read a section (`{ "flux": { "unet_name": "...", "clip2_name": "..." },
+  "sdxl": { "checkpoint_name": "..." } }`), or
+- set env vars: `LORABOX_PREVIEW_UNET/_CLIP/_VAE` (Z-Image) or
+  `LORABOX_PREVIEW_<ENGINE>_<KEY>` (e.g. `LORABOX_PREVIEW_FLUX_UNET_NAME`).
 
 Model names are matched leniently (exact first, then a substring of the stem),
-so a differently-suffixed build is still found.
+so a differently-suffixed build is still found. Force a specific engine with
+`LORABOX_PREVIEW_ENGINE=flux|sdxl|sd15|zimage`; pick the fallback for
+unrecognised LoRAs with `LORABOX_PREVIEW_DEFAULT_ENGINE`.
+
+### Picker groups / custom categories
+
+The LoRA picker groups loras by architecture (Z-Image, Flux, Krea, SDXL, SD1.5,
+LTX Video, Other), detected from the filename or safetensors metadata.
+**Right-click** any lora in the picker to move it to a different group, create a
+new one, or revert to auto. The choice is stored by lora name in
+`user_categories.json` next to the node, so it persists and is shared by every
+Lora Box.
 
 ### Civitai lookups (opt-in)
 

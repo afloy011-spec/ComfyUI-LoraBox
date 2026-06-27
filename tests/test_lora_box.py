@@ -267,6 +267,28 @@ class LoraBoxTest(unittest.TestCase):
         self.assertEqual(lora_box._category_from_meta(
             {"modelspec.architecture": "zimageturbo/lora"}), "Z-Image")
 
+    def test_category_sdxl_and_sd15(self):
+        # filename heuristics
+        self.assertEqual(lora_box._category_from_name("my_sdxl_style.safetensors"), "SDXL")
+        self.assertEqual(lora_box._category_from_name("char-xl-v2.safetensors"), "SDXL")
+        self.assertEqual(lora_box._category_from_name("anime_sd15_v3.safetensors"), "SD1.5")
+        # metadata heuristics
+        self.assertEqual(lora_box._category_from_meta(
+            {"ss_base_model_version": "sdxl_base_v1-0"}), "SDXL")
+        self.assertEqual(lora_box._category_from_meta(
+            {"modelspec.architecture": "stable-diffusion-xl-v1-base/lora"}), "SDXL")
+        self.assertEqual(lora_box._category_from_meta(
+            {"ss_sd_model_name": "v1-5-pruned.safetensors"}), "SD1.5")
+
+    def test_user_category_override_wins(self):
+        # a user-assigned group beats auto-detection; clearing reverts to auto
+        lora_box._USERCATS = {"a.safetensors": "Favorites"}
+        try:
+            self.assertEqual(lora_box.category_for("a.safetensors"), "Favorites")
+        finally:
+            lora_box._USERCATS = {}
+        self.assertEqual(lora_box.category_for("a.safetensors"), "Other")
+
     def test_category_for_uses_metadata_when_name_generic(self):
         p = os.path.join(self.tmp, "pinterest_girl.safetensors")
         _make_safetensors(p, {"ss_base_model_version": "zimage"})

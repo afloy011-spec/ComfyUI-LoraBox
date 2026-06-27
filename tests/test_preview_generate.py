@@ -99,6 +99,48 @@ class TestPreviewGenerate(unittest.TestCase):
         unet = next(v for v in p.values() if v["class_type"] == "UNETLoader")
         self.assertEqual(unet["inputs"]["unet_name"], "z_image_turbo_bf16_fp8.safetensors")
 
+    # --- cross-architecture engines ------------------------------------------
+    def test_engine_for_by_category(self):
+        _write_lora("flux_char.safetensors")
+        _write_lora("my_sdxl.safetensors")
+        _write_lora("anime_sd15.safetensors")
+        _write_lora("plain_zimage.safetensors")
+        self.assertEqual(preview_generate.engine_for("flux_char.safetensors"), "flux")
+        self.assertEqual(preview_generate.engine_for("my_sdxl.safetensors"), "sdxl")
+        self.assertEqual(preview_generate.engine_for("anime_sd15.safetensors"), "sd15")
+        self.assertEqual(preview_generate.engine_for("plain_zimage.safetensors"), "zimage")
+
+    def test_flux_graph_shape(self):
+        _write_lora("flux_char.safetensors", {"trigger_phrase": "fluxtok"})
+        for m in ("flux1-dev.safetensors", "clip_l.safetensors",
+                  "t5xxl_fp16.safetensors", "ae.safetensors"):
+            _LORAS[m] = "/fake/" + m
+        p = preview_generate.build_preview_prompt("flux_char.safetensors")
+        kinds = {v["class_type"] for v in p.values()}
+        self.assertIn("DualCLIPLoader", kinds)
+        self.assertIn("FluxGuidance", kinds)
+        lora = next(v for v in p.values() if v["class_type"] == "LoraLoader")
+        self.assertEqual(lora["inputs"]["lora_name"], "flux_char.safetensors")
+
+    def test_sdxl_graph_uses_checkpoint(self):
+        _write_lora("my_sdxl.safetensors", {"trigger_phrase": "xltok"})
+        _LORAS["sd_xl_base_1.0.safetensors"] = "/fake/ckpt"
+        p = preview_generate.build_preview_prompt("my_sdxl.safetensors")
+        kinds = {v["class_type"] for v in p.values()}
+        self.assertIn("CheckpointLoaderSimple", kinds)
+        self.assertIn("EmptyLatentImage", kinds)
+        # vae comes from the checkpoint (slot 2), not a separate VAELoader
+        self.assertNotIn("VAELoader", kinds)
+        dec = next(v for v in p.values() if v["class_type"] == "VAEDecode")
+        self.assertEqual(dec["inputs"]["vae"], ["1", 2])
+
+    def test_missing_flux_models_name_the_engine(self):
+        _write_lora("flux_char.safetensors")  # no flux models installed
+        with self.assertRaises(RuntimeError) as cm:
+            preview_generate.build_preview_prompt("flux_char.safetensors")
+        self.assertIn("Flux", str(cm.exception))
+        self.assertIn("aren't installed", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

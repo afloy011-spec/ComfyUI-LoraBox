@@ -1,8 +1,10 @@
 """Headless canonical preview generation for Lora Box.
 
-Builds a minimal Z-Image Turbo API prompt, queues it on the running ComfyUI
-instance, waits for SaveImage output, and writes a resized PNG sidecar next to
-the LoRA file.
+Builds a minimal API prompt for the LoRA's architecture (Z-Image / Flux / SDXL /
+SD1.5), queues it on the running ComfyUI instance, waits for the SaveImage
+output, and writes a resized PNG sidecar next to the LoRA file. The engine is
+chosen from the LoRA's detected category; the seed and base prompts are shared
+so thumbnails stay comparable, and missing models fail with a clear message.
 """
 
 from __future__ import annotations
@@ -18,9 +20,11 @@ import shutil
 import folder_paths
 
 try:
-    from .lora_box import trigger_words_for, merge_prompt, _preview_base, PREVIEW_EXTS
+    from .lora_box import (trigger_words_for, merge_prompt, _preview_base,
+                           category_for, PREVIEW_EXTS)
 except ImportError:
-    from lora_box import trigger_words_for, merge_prompt, _preview_base, PREVIEW_EXTS
+    from lora_box import (trigger_words_for, merge_prompt, _preview_base,
+                          category_for, PREVIEW_EXTS)
 
 log = logging.getLogger("LoraBox.preview")
 
@@ -109,9 +113,202 @@ PREVIEW_THUMB_MAX = 512
 
 _GEN_LOCK = asyncio.Lock()
 
+# ---- architecture engines -------------------------------------------------
+# Generate picks an engine from the LoRA's detected category so a Flux / SDXL /
+# SD1.5 lora renders with the right graph, not just Z-Image. Each engine is a
+# (label, default models + sampler params, required model slots, graph builder).
+# Models are configurable per engine via preview_config.json sections, e.g.
+#   { "flux": {"unet_name": "...", "clip2_name": "..."} }
+# or env vars LORABOX_PREVIEW_<ENGINE>_<KEY> (e.g. LORABOX_PREVIEW_FLUX_UNET_NAME).
+# (The Z-Image engine also keeps the legacy flat LORABOX_PREVIEW_UNET/_CLIP/_VAE.)
+_SEED = PREVIEW_CONFIG["seed"]
+_NEG = PREVIEW_CONFIG["negative"]
+
+ENGINE_LABELS = {"zimage": "Z-Image", "flux": "Flux", "sdxl": "SDXL", "sd15": "SD1.5"}
+
+# category (from lora_box.category_for) -> engine key
+_CATEGORY_ENGINE = {
+    "Z-Image": "zimage",
+    "Flux": "flux", "Krea": "flux",   # Krea is a Flux finetune
+    "SDXL": "sdxl", "SD1.5": "sd15",
+}
+
+ENGINE_DEFAULTS = {
+    "flux": {
+        "unet_name": "flux1-dev.safetensors",
+        "clip_name": "clip_l.safetensors",
+        "clip2_name": "t5xxl_fp16.safetensors",
+        "vae_name": "ae.safetensors",
+        "guidance": 3.5,
+        "seed": _SEED, "steps": 20, "cfg": 1.0,
+        "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0,
+        "width": 1024, "height": 1024,
+        "lora_strength_model": 0.9, "lora_strength_clip": 0.9, "negative": _NEG,
+    },
+    "sdxl": {
+        "checkpoint_name": "sd_xl_base_1.0.safetensors",
+        "seed": _SEED, "steps": 25, "cfg": 7.0,
+        "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0,
+        "width": 1024, "height": 1024,
+        "lora_strength_model": 0.9, "lora_strength_clip": 0.9, "negative": _NEG,
+    },
+    "sd15": {
+        "checkpoint_name": "v1-5-pruned-emaonly.safetensors",
+        "seed": _SEED, "steps": 25, "cfg": 7.0,
+        "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0,
+        "width": 512, "height": 512,
+        "lora_strength_model": 0.9, "lora_strength_clip": 0.9, "negative": _NEG,
+    },
+}
+
+# slot key -> (search folders, human label) for the missing-models message
+ENGINE_SLOTS = {
+    "zimage": [("unet_name", ("diffusion_models", "unet"), "UNet/diffusion model"),
+               ("clip_name", ("text_encoders", "clip"), "CLIP/text-encoder"),
+               ("vae_name", ("vae",), "VAE")],
+    "flux": [("unet_name", ("diffusion_models", "unet"), "UNet/diffusion model"),
+             ("clip_name", ("text_encoders", "clip"), "CLIP (clip_l)"),
+             ("clip2_name", ("text_encoders", "clip"), "CLIP (t5xxl)"),
+             ("vae_name", ("vae",), "VAE")],
+    "sdxl": [("checkpoint_name", ("checkpoints",), "SDXL checkpoint")],
+    "sd15": [("checkpoint_name", ("checkpoints",), "SD1.5 checkpoint")],
+}
+
+
+def _read_user_config() -> dict:
+    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preview_config.json")
+    try:
+        if os.path.isfile(cfg_path):
+            with open(cfg_path, encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        log.warning("preview_config.json ignored: %s", e)
+    return {}
+
+
+def _engine_cfg(engine: str) -> dict:
+    """Merged config for one engine: defaults < preview_config.json < env."""
+    if engine == "zimage":
+        return _load_config()   # back-compat path (flat keys + LORABOX_PREVIEW_*)
+    cfg = dict(ENGINE_DEFAULTS[engine])
+    sect = _read_user_config().get(engine)
+    if isinstance(sect, dict):
+        cfg.update({k: v for k, v in sect.items() if k in cfg})
+    prefix = "LORABOX_PREVIEW_%s_" % engine.upper()
+    for k in list(cfg.keys()):
+        v = os.environ.get(prefix + k.upper())
+        if v is not None:
+            cfg[k] = v
+    return cfg
+
+
+def _default_engine() -> str:
+    e = os.environ.get("LORABOX_PREVIEW_DEFAULT_ENGINE", "zimage").strip().lower()
+    return e if e in ENGINE_LABELS else "zimage"
+
+
+def engine_for(lora_name: str) -> str:
+    """Pick the render engine for a lora: explicit override, else its category."""
+    forced = os.environ.get("LORABOX_PREVIEW_ENGINE", "").strip().lower()
+    if forced in ENGINE_LABELS:
+        return forced
+    try:
+        cat = category_for(lora_name)
+    except Exception:
+        cat = None
+    return _CATEGORY_ENGINE.get(cat, _default_engine())
+
+
+def _build_zimage(cfg, r, lora_name, positive) -> dict:
+    return {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": r["unet_name"], "weight_dtype": "default"}},
+        "2": {"class_type": "CLIPLoader",
+              "inputs": {"clip_name": r["clip_name"], "type": cfg["clip_type"], "device": "default"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": r["vae_name"]}},
+        "4": {"class_type": "ModelSamplingAuraFlow",
+              "inputs": {"model": ["1", 0], "shift": cfg["aura_shift"]}},
+        "5": {"class_type": "LoraLoader",
+              "inputs": {"model": ["4", 0], "clip": ["2", 0], "lora_name": lora_name,
+                         "strength_model": cfg["lora_strength_model"],
+                         "strength_clip": cfg["lora_strength_clip"]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 1], "text": positive}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 1], "text": cfg["negative"]}},
+        "8": {"class_type": "EmptySD3LatentImage",
+              "inputs": {"width": cfg["width"], "height": cfg["height"], "batch_size": 1}},
+        "9": {"class_type": "KSampler",
+              "inputs": {"model": ["5", 0], "positive": ["6", 0], "negative": ["7", 0],
+                         "latent_image": ["8", 0], "seed": cfg["seed"], "steps": cfg["steps"],
+                         "cfg": cfg["cfg"], "sampler_name": cfg["sampler_name"],
+                         "scheduler": cfg["scheduler"], "denoise": cfg["denoise"]}},
+        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["3", 0]}},
+        SAVE_NODE_ID: {"class_type": "SaveImage",
+                       "inputs": {"images": ["10", 0], "filename_prefix": "lorabox_preview"}},
+    }
+
+
+def _build_flux(cfg, r, lora_name, positive) -> dict:
+    return {
+        "1": {"class_type": "UNETLoader",
+              "inputs": {"unet_name": r["unet_name"], "weight_dtype": "default"}},
+        "2": {"class_type": "DualCLIPLoader",
+              "inputs": {"clip_name1": r["clip_name"], "clip_name2": r["clip2_name"], "type": "flux"}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": r["vae_name"]}},
+        "5": {"class_type": "LoraLoader",
+              "inputs": {"model": ["1", 0], "clip": ["2", 0], "lora_name": lora_name,
+                         "strength_model": cfg["lora_strength_model"],
+                         "strength_clip": cfg["lora_strength_clip"]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 1], "text": positive}},
+        "12": {"class_type": "FluxGuidance",
+               "inputs": {"conditioning": ["6", 0], "guidance": cfg["guidance"]}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 1], "text": cfg["negative"]}},
+        "8": {"class_type": "EmptySD3LatentImage",
+              "inputs": {"width": cfg["width"], "height": cfg["height"], "batch_size": 1}},
+        "9": {"class_type": "KSampler",
+              "inputs": {"model": ["5", 0], "positive": ["12", 0], "negative": ["7", 0],
+                         "latent_image": ["8", 0], "seed": cfg["seed"], "steps": cfg["steps"],
+                         "cfg": cfg["cfg"], "sampler_name": cfg["sampler_name"],
+                         "scheduler": cfg["scheduler"], "denoise": cfg["denoise"]}},
+        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["3", 0]}},
+        SAVE_NODE_ID: {"class_type": "SaveImage",
+                       "inputs": {"images": ["10", 0], "filename_prefix": "lorabox_preview"}},
+    }
+
+
+def _build_checkpoint(cfg, r, lora_name, positive) -> dict:
+    """SDXL / SD1.5: one CheckpointLoaderSimple feeds model, clip and vae."""
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple",
+              "inputs": {"ckpt_name": r["checkpoint_name"]}},
+        "5": {"class_type": "LoraLoader",
+              "inputs": {"model": ["1", 0], "clip": ["1", 1], "lora_name": lora_name,
+                         "strength_model": cfg["lora_strength_model"],
+                         "strength_clip": cfg["lora_strength_clip"]}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 1], "text": positive}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["5", 1], "text": cfg["negative"]}},
+        "8": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": cfg["width"], "height": cfg["height"], "batch_size": 1}},
+        "9": {"class_type": "KSampler",
+              "inputs": {"model": ["5", 0], "positive": ["6", 0], "negative": ["7", 0],
+                         "latent_image": ["8", 0], "seed": cfg["seed"], "steps": cfg["steps"],
+                         "cfg": cfg["cfg"], "sampler_name": cfg["sampler_name"],
+                         "scheduler": cfg["scheduler"], "denoise": cfg["denoise"]}},
+        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["1", 2]}},
+        SAVE_NODE_ID: {"class_type": "SaveImage",
+                       "inputs": {"images": ["10", 0], "filename_prefix": "lorabox_preview"}},
+    }
+
+
+ENGINE_BUILD = {"zimage": _build_zimage, "flux": _build_flux,
+                "sdxl": _build_checkpoint, "sd15": _build_checkpoint}
+
 
 def build_preview_prompt(lora_name: str, kind: str = "character") -> dict:
-    """Return a ComfyUI API prompt dict for one canonical preview image."""
+    """Return a ComfyUI API prompt dict for one canonical preview image.
+
+    The graph matches the LoRA's architecture (Z-Image / Flux / SDXL / SD1.5).
+    Raises RuntimeError naming the missing models if that engine isn't installed.
+    """
     kind = (kind or "character").lower()
     if kind not in PREVIEW_PROMPTS:
         kind = "character"
@@ -121,97 +318,25 @@ def build_preview_prompt(lora_name: str, kind: str = "character") -> dict:
     # trigger words go in front by default (stronger activation on the encoder)
     positive = merge_prompt(base, triggers, "beginning", ", ")
 
-    cfg = _load_config()
-    unet = _resolve_model(("diffusion_models", "unet"), cfg["unet_name"])
-    clip = _resolve_model(("text_encoders", "clip"), cfg["clip_name"])
-    vae = _resolve_model(("vae",), cfg["vae_name"])
-    missing = []
-    if not unet:
-        missing.append("UNet/diffusion model '%s'" % cfg["unet_name"])
-    if not clip:
-        missing.append("CLIP/text-encoder '%s'" % cfg["clip_name"])
-    if not vae:
-        missing.append("VAE '%s'" % cfg["vae_name"])
+    engine = engine_for(lora_name)
+    cfg = _engine_cfg(engine)
+    resolved, missing = {}, []
+    for key, folders, label in ENGINE_SLOTS[engine]:
+        got = _resolve_model(folders, cfg[key])
+        if got:
+            resolved[key] = got
+        else:
+            missing.append("%s '%s'" % (label, cfg[key]))
     if missing:
         raise RuntimeError(
-            "Preview generation needs Z-Image Turbo models that aren't installed: "
+            "Preview generation for this %s LoRA needs models that aren't installed: "
+            % ENGINE_LABELS[engine]
             + "; ".join(missing)
-            + ". Install them, or point LoRA Box at your own models via a "
-            "preview_config.json next to the node (or the LORABOX_PREVIEW_UNET / "
-            "_CLIP / _VAE env vars). You can always set a picture with Upload or "
-            "drag-and-drop instead.")
+            + ". Install them, or configure LoRA Box (a preview_config.json next to "
+            "the node, or LORABOX_PREVIEW_* env vars). You can always set a picture "
+            "with Upload or drag-and-drop instead.")
 
-    return {
-        "1": {
-            "class_type": "UNETLoader",
-            "inputs": {"unet_name": unet, "weight_dtype": "default"},
-        },
-        "2": {
-            "class_type": "CLIPLoader",
-            "inputs": {
-                "clip_name": clip,
-                "type": cfg["clip_type"],
-                "device": "default",
-            },
-        },
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
-        "4": {
-            "class_type": "ModelSamplingAuraFlow",
-            "inputs": {"model": ["1", 0], "shift": cfg["aura_shift"]},
-        },
-        "5": {
-            "class_type": "LoraLoader",
-            "inputs": {
-                "model": ["4", 0],
-                "clip": ["2", 0],
-                "lora_name": lora_name,
-                "strength_model": cfg["lora_strength_model"],
-                "strength_clip": cfg["lora_strength_clip"],
-            },
-        },
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"clip": ["5", 1], "text": positive},
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {"clip": ["5", 1], "text": cfg["negative"]},
-        },
-        "8": {
-            "class_type": "EmptySD3LatentImage",
-            "inputs": {
-                "width": cfg["width"],
-                "height": cfg["height"],
-                "batch_size": 1,
-            },
-        },
-        "9": {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": ["5", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["8", 0],
-                "seed": cfg["seed"],
-                "steps": cfg["steps"],
-                "cfg": cfg["cfg"],
-                "sampler_name": cfg["sampler_name"],
-                "scheduler": cfg["scheduler"],
-                "denoise": cfg["denoise"],
-            },
-        },
-        "10": {
-            "class_type": "VAEDecode",
-            "inputs": {"samples": ["9", 0], "vae": ["3", 0]},
-        },
-        SAVE_NODE_ID: {
-            "class_type": "SaveImage",
-            "inputs": {
-                "images": ["10", 0],
-                "filename_prefix": "lorabox_preview",
-            },
-        },
-    }
+    return ENGINE_BUILD[engine](cfg, resolved, lora_name, positive)
 
 
 def _comfy_image_path(img_info: dict) -> str:

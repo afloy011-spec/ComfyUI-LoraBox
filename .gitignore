@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# user-/machine-specific runtime config (not shipped)
+preview_config.json
+user_categories.json

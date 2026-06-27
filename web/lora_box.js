@@ -64,6 +64,21 @@ async function getLoraCategories() {
     return LORA_CAT_PROMISE;
 }
 
+// Persist a lora's custom picker group (empty = revert to auto-detect). Updates
+// the local category map immediately so a redraw reflects it without a refetch.
+async function setLoraCategory(name, group) {
+    try {
+        const r = await api.fetchApi("/lorabox/usercats", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, group: group || "" }),
+        });
+        if (!r.ok) return false;
+        const j = await r.json();
+        if (LORA_CATEGORIES && j && j.name) LORA_CATEGORIES[j.name] = j.group;
+        return true;
+    } catch (e) { return false; }
+}
+
 async function getLoraList() {
     if (LORA_LIST) return LORA_LIST;
     if (!LORA_LIST_PROMISE) {
@@ -476,6 +491,26 @@ function injectStyle() {
 .lb-toast-act{background:transparent; border:1px solid #3b5a8a; border-radius:6px; padding:4px 12px;
   cursor:pointer; font-size:12px; font-weight:600; color:var(--lb-accent,#3b82f6);}
 .lb-toast-act:hover{background:var(--lb-accent-soft,#1d3a5f); color:#fff;}
+
+/* category menu footer hint in the picker */
+.lb-pop-hint{flex:0 0 auto; padding:6px 9px 3px; margin-top:2px; font-size:10px; color:#6a6a6a;
+  border-top:1px solid var(--border-color,var(--lb-border,#2e2e2e)); user-select:none;}
+
+/* ── presentation polish (visual only; no layout/sizing change) ── */
+@keyframes lb-fade{from{opacity:0}to{opacity:1}}
+@keyframes lb-shimmer{0%{background-position:-160px 0}100%{background-position:160px 0}}
+.lorabox .lb-card:hover{box-shadow:0 3px 12px rgba(0,0,0,.28);}
+.lorabox .lb-thumb.has-img img{animation:lb-fade .25s ease;}
+.lorabox .lb-thumb.loading{background-repeat:no-repeat;
+  background-image:linear-gradient(100deg,#242424 30%,#323232 50%,#242424 70%);
+  background-size:240px 100%; animation:lb-shimmer 1.1s linear infinite;}
+.lorabox .lb-thumb.loading .lb-ph{visibility:hidden;}
+.lorabox .lb-empty{animation:lb-fade .25s ease;}
+.lorabox .lb-count{transition:background .15s, color .15s;}
+.lorabox .lb-ico:active,.lorabox .lb-gear:active{transform:scale(.88);}
+.lorabox .lb-add:hover{box-shadow:0 2px 10px color-mix(in srgb,var(--lb-accent,#3b82f6) 18%,transparent);}
+.lorabox .lb-name:focus-visible,.lorabox .lb-thumb:focus-visible,
+.lorabox .lb-ico:focus-visible,.lorabox .lb-gear:focus-visible{outline:2px solid var(--lb-accent,#3b82f6); outline-offset:1px;}
 `;
     document.head.appendChild(s);
 }
@@ -556,6 +591,36 @@ function openMenu(anchor, items) {
     setTimeout(() => document.addEventListener("pointerdown", onMenuDocDown, true), 0);
 }
 
+/* Custom picker groups currently in use (any category that isn't a built-in). */
+function customGroupsInUse() {
+    const builtin = new Set(LORA_GROUP_ORDER);
+    const out = [];
+    if (LORA_CATEGORIES) {
+        for (const v of Object.values(LORA_CATEGORIES)) {
+            if (v && !builtin.has(v) && !out.includes(v)) out.push(v);
+        }
+    }
+    return out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/* Right-click a picker item → assign it to a group (built-in, existing custom,
+ * a new one, or back to auto-detected). Persists via setLoraCategory. */
+function openCategoryMenu(anchor, name, after) {
+    const cur = loraCategory(name);
+    const groups = [...LORA_GROUP_ORDER, ...customGroupsInUse()];
+    const items = [{ head: "Move to group" }];
+    for (const g of groups) {
+        items.push({ label: (g === cur ? "● " : "") + g, onPick: async () => { await setLoraCategory(name, g); after && after(); } });
+    }
+    items.push({ sep: true });
+    items.push({ label: "New group…", icon: PLUS_SVG, onPick: async () => {
+        const g = (window.prompt("New group name:") || "").trim();
+        if (g) { await setLoraCategory(name, g); after && after(); }
+    } });
+    items.push({ label: "Auto (detected)", onPick: async () => { await setLoraCategory(name, ""); after && after(); } });
+    openMenu(anchor, items);
+}
+
 /* Force the panel's root element to span the node's content width. The
  * frontend positions/sizes DOM widgets reactively off the widget's HEIGHT, so
  * widening the node does not re-stretch the element on its own. We set the
@@ -593,7 +658,9 @@ function installTouchGuard() {
 }
 
 /* ---- lora picker grouping ------------------------------------------------ */
-const LORA_GROUP_ORDER = ["Z-Image", "Flux", "Krea", "LTX Video", "Other"];
+// Built-in groups in display order; custom (user-assigned) groups slot in
+// alphabetically between these and the trailing "Other".
+const LORA_GROUP_ORDER = ["Z-Image", "Flux", "Krea", "SDXL", "SD1.5", "LTX Video", "Other"];
 
 function loraCategory(name) {
     if (!name || name === "None") return null;
@@ -601,9 +668,24 @@ function loraCategory(name) {
     const low = name.toLowerCase().replace(/\\/g, "/");
     if (low.includes("zimage") || low.includes("z-image") || low.includes("z_image")) return "Z-Image";
     if (low.includes("ltx")) return "LTX Video";
-    if (low.includes("flux")) return "Flux";
     if (low.includes("krea")) return "Krea";
+    if (low.includes("flux")) return "Flux";
+    if (/(^|[^a-z])xl([^a-z]|$)|sdxl/.test(low)) return "SDXL";
+    if (low.includes("sd15") || low.includes("sd1.5") || low.includes("sd_15") || low.includes("v1-5")) return "SD1.5";
     return "Other";
+}
+
+// Effective group order = built-ins (that have items) + any custom groups
+// present in the data (alpha) + "Other" last. Robust to user-defined groups.
+function effectiveGroupOrder(buckets) {
+    const seen = new Set();
+    const order = [];
+    for (const g of LORA_GROUP_ORDER) { if (g !== "Other") { order.push(g); seen.add(g); } }
+    Object.keys(buckets).filter((c) => !seen.has(c) && c !== "Other")
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+        .forEach((c) => order.push(c));
+    order.push("Other");
+    return order;
 }
 
 function groupedLoraList(names, filter) {
@@ -611,14 +693,18 @@ function groupedLoraList(names, filter) {
     const filtered = names.filter((n) => n === "None" || !f || n.toLowerCase().includes(f));
     const groups = [];
     if (filtered.includes("None")) groups.push({ label: null, items: ["None"] });
-    const buckets = Object.fromEntries(LORA_GROUP_ORDER.map((g) => [g, []]));
+    const buckets = {};
     for (const n of filtered) {
         if (n === "None") continue;
-        buckets[loraCategory(n)].push(n);
+        const c = loraCategory(n) || "Other";
+        (buckets[c] = buckets[c] || []).push(n);
     }
-    for (const g of LORA_GROUP_ORDER) {
-        buckets[g].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-        if (buckets[g].length) groups.push({ label: g, items: buckets[g] });
+    for (const g of effectiveGroupOrder(buckets)) {
+        const items = buckets[g];
+        if (items && items.length) {
+            items.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+            groups.push({ label: g, items });
+        }
     }
     return groups;
 }
@@ -627,6 +713,7 @@ function groupedLoraList(names, filter) {
 let CUR_POP = null;
 
 function onDocDown(e) {
+    if (MENU && MENU.contains(e.target)) return;   // the category menu floats over the picker
     if (CUR_POP && !CUR_POP.contains(e.target) && e.target !== CUR_POP._anchor && !CUR_POP._anchor.contains(e.target)) closePop();
 }
 function onWinWheel(e) { if (CUR_POP && !CUR_POP.contains(e.target)) closePop(); }
@@ -716,7 +803,10 @@ async function openPicker(node, row, fieldEl) {
     searchWrap.append(searchIc, search);
     const listEl = document.createElement("div");
     listEl.className = "lb-pop-list";
-    pop.append(searchWrap, listEl);
+    const foot = document.createElement("div");
+    foot.className = "lb-pop-hint";
+    foot.textContent = "Right-click a LoRA to set its group";
+    pop.append(searchWrap, listEl, foot);
     document.body.appendChild(pop);
     CUR_POP = pop;
     fieldEl.classList.add("open");
@@ -783,6 +873,12 @@ async function openPicker(node, row, fieldEl) {
                 it.title = incompat ? n + "  (different architecture than your model)" : n;
                 it.append(chk, lbl);
                 it.onmousedown = (e) => { e.preventDefault(); pick(n); };
+                if (n !== "None") {
+                    it.oncontextmenu = (e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        openCategoryMenu(it, n, () => draw(search.value));
+                    };
+                }
                 listEl.appendChild(it);
             }
         }
@@ -1312,12 +1408,14 @@ function buildThumb(node, row) {
         else { img.removeAttribute("src"); thumb.classList.remove("has-img"); }
     };
     const refresh = () => {
-        if (!row.name || row.name === "None") { setURL(null); return; }
+        if (!row.name || row.name === "None") { thumb.classList.remove("loading"); setURL(null); return; }
         // synchronous when cached → image is there on the first frame, so a
         // re-render (e.g. drag-reorder) never flashes empty.
-        if (PREVIEW_CACHE.has(row.name)) { setURL(PREVIEW_CACHE.get(row.name)); return; }
+        if (PREVIEW_CACHE.has(row.name)) { thumb.classList.remove("loading"); setURL(PREVIEW_CACHE.get(row.name)); return; }
+        // not cached yet → show a shimmer while the preview resolves
+        thumb.classList.add("loading");
         loadPreviewURL(row.name).then((u) => {
-            if (document.body.contains(thumb) && row.name && row.name !== "None") setURL(u);
+            if (document.body.contains(thumb) && row.name && row.name !== "None") { thumb.classList.remove("loading"); setURL(u); }
         });
     };
     thumb._lbRefresh = refresh;
