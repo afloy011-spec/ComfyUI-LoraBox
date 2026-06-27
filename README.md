@@ -83,6 +83,37 @@ ComfyUI/custom_nodes/ComfyUI-LoraBox/
     └── lora_box.js
 ```
 
+## Configuration
+
+Everything works out of the box; these are optional knobs for the two features
+that reach outside the node.
+
+### Preview generation (`✨ Generate`)
+
+The built-in **Generate** renders a quick **Z-Image Turbo** test image and saves
+it as the LoRA's sidecar. It needs three models installed: a UNet/diffusion
+model, a CLIP/text-encoder and a VAE (defaults: `z_image_turbo_bf16.safetensors`,
+`qwen_3_4b.safetensors`, `ae.safetensors`).
+
+If those aren't present, Generate reports exactly what's missing instead of
+failing cryptically — and **Upload / drag-and-drop** (and the automatic
+`<lora>.preview.png` sidecar) work regardless, so every LoRA can still get a
+picture. To point Generate at your own models either:
+
+- drop a `preview_config.json` next to the node (any of the keys in
+  `PREVIEW_CONFIG` — e.g. `{ "unet_name": "...", "clip_name": "...", "vae_name": "..." }`), or
+- set the env vars `LORABOX_PREVIEW_UNET`, `LORABOX_PREVIEW_CLIP`, `LORABOX_PREVIEW_VAE`.
+
+Model names are matched leniently (exact first, then a substring of the stem),
+so a differently-suffixed build is still found.
+
+### Civitai lookups (opt-in)
+
+When a LoRA has no local trigger words / preview, the node can resolve them from
+Civitai by file hash. This is **off by default** (it hashes the whole file and
+sends that hash to a third party). Enable it with the env var
+`LORABOX_CIVITAI=1` (also accepts `true` / `yes` / `on`).
+
 ## Develop / test
 
 ```

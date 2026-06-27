@@ -60,14 +60,12 @@ Each LoRA is one card with:
 
 | Control | Behaviour |
 |---------|-----------|
-| **Left stripe** | Drag handle for reorder; colour indicates on/off (dim when off, amber when duplicate) |
-| **On/off toggle** | Enable or disable this LoRA for the current run |
-| **Thumbnail** | Visual identity for the LoRA (see §7) |
+| **On/off toggle** | Enable or disable this LoRA for the current run; the whole card dims when off (or amber-bordered when it duplicates another row) |
+| **Thumbnail** | Visual identity for the LoRA (see §7); also the **drag handle** for reorder |
 | **Name field** | Click → searchable grouped picker |
-| **🎲** | Pick a random LoRA from the registered list |
-| **ⓘ** | Expand inline trigger-word editor |
+| **＋ / − toggle** | Expand / collapse the inline trigger-word editor for this row |
 | **✕** | Remove row (with Undo toast) |
-| **Strength slider + number** | Weight **−3 … 3** (supports anti-LoRA / >1.0 strengths) |
+| **Strength slider + number** | Slider covers **0 … 2** (default `1.0`); the value box accepts any number you type, clamped to **±10** (negative "anti-LoRA" weights allowed) |
 
 Additional rules:
 
@@ -165,6 +163,12 @@ Headless Z-Image Turbo render via ComfyUI queue:
 
 Trigger words are auto-read from metadata before rendering.
 
+The three model files are configurable (`preview_config.json` next to the node,
+or the `LORABOX_PREVIEW_UNET` / `_CLIP` / `_VAE` env vars) and resolved leniently
+against the installed list. If they can't be found, Generate fails with an
+explicit "models not installed" message; **Upload / drag-and-drop still work**, so
+the feature degrades gracefully on any setup.
+
 ---
 
 ## 8. Backend
@@ -179,6 +183,11 @@ Trigger words are auto-read from metadata before rendering.
 ### HTTP routes
 
 All routes validate the file name against ComfyUI's registered `loras` list (path traversal protection).
+
+When a LoRA has no local trigger words / preview, the `triggers` and `preview`
+routes can fall back to Civitai (resolve by file hash). This is **opt-in**, off
+unless `LORABOX_CIVITAI` is set (`1`/`true`/`yes`/`on`), and always runs off the
+event loop.
 
 | Method | Route | Purpose |
 |--------|-------|---------|

@@ -265,6 +265,20 @@ def category_for(name):
     return _category_from_meta(_read_st_metadata(path))
 
 
+def _word_in_text(word, text):
+    """True if `word` appears in `text` on word boundaries (case-insensitive).
+
+    Used for de-duplicating trigger words against the prompt. A plain substring
+    test ("man" in "woman") wrongly dropped valid triggers; we anchor on
+    non-word boundaries instead, and fall back to a substring test for tokens
+    that contain no word characters (so an odd token can't raise re.error).
+    """
+    try:
+        return re.search(r"(?<!\w)" + re.escape(word) + r"(?!\w)", text, re.IGNORECASE) is not None
+    except re.error:
+        return word.lower() in text.lower()
+
+
 def merge_prompt(prompt, triggers, position="end", delimiter=", "):
     """Combine a prompt with trigger words at the chosen position.
 
@@ -281,8 +295,7 @@ def merge_prompt(prompt, triggers, position="end", delimiter=", "):
     if not p:
         return t
 
-    plow = p.lower()
-    kept = [w.strip() for w in t.split(",") if w.strip() and w.strip().lower() not in plow]
+    kept = [w.strip() for w in t.split(",") if w.strip() and not _word_in_text(w.strip(), p)]
     t = ", ".join(kept)
     if not t:
         return p
@@ -345,6 +358,16 @@ _HASH_CACHE = OrderedDict()   # path -> (mtime, sha256)
 _CIVITAI_MISS = set()         # paths we already failed to resolve; don't retry every request
 
 
+def _civitai_enabled():
+    """Whether to reach out to civitai.com for previews / trigger words.
+
+    Off by default: resolving a lora means hashing the whole file and sending
+    that hash to a third party, which a public node must not do silently. Opt in
+    with the env var LORABOX_CIVITAI=1 (any of 1/true/yes/on).
+    """
+    return str(os.environ.get("LORABOX_CIVITAI", "")).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _sha256(path):
     mt = _mtime(path)
     hit = _HASH_CACHE.get(path)
@@ -370,6 +393,8 @@ def _http_get(url, timeout):
 
 def _fetch_civitai_preview(name):
     """No local sidecar -> resolve on Civitai by file hash, save <base>.<ext>. Blocking."""
+    if not _civitai_enabled():
+        return None
     path = _safe_lora_path(name)
     if not path or path in _CIVITAI_MISS:
         return None
@@ -411,6 +436,8 @@ def _fetch_civitai_triggers(name):
     cached, so a hit is instant afterwards and a miss is never retried. This is
     only wired into the /lorabox/triggers route, never into graph execution.
     """
+    if not _civitai_enabled():
+        return []
     path = _safe_lora_path(name)
     if not path or path in _CIVITAI_TRIG_MISS:
         return []

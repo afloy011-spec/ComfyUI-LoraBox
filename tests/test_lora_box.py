@@ -323,6 +323,17 @@ class PromptMergeTest(unittest.TestCase):
     def test_whitespace_trimmed(self):
         self.assertEqual(self.m("  p  ", "  t  ", self.END), "p, t")
 
+    def test_substring_trigger_not_dropped(self):
+        # a trigger that is only a SUBSTRING of a prompt word must survive
+        # ("man" must not be dropped because the prompt contains "woman")
+        self.assertEqual(self.m("a woman walking", "man, hat", self.END),
+                         "a woman walking, man, hat")
+
+    def test_whole_word_trigger_dropped(self):
+        # but a trigger present as a whole word IS de-duplicated
+        self.assertEqual(self.m("a man walking", "man, hat", self.END),
+                         "a man walking, hat")
+
 
 if __name__ == "__main__":
     unittest.main()

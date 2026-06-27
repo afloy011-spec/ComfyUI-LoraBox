@@ -42,92 +42,6 @@ const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
 const VMIN = -10, VMAX = 10;
 const clampV = (v) => Math.max(VMIN, Math.min(VMAX, isNaN(v) ? 1 : v));
 
-/* ---- looping video background (ported from the timur branch) -------------
- * The title bar is painted by litegraph AFTER onDrawBackground, so a single
- * background draw can't cover it. Trick: draw the SAME source with the SAME
- * dest rect [0,-titleH, W, titleH+bodyH] in BOTH callbacks but clip each to its
- * own region — body slice in onDrawBackground (behind slots/widget), title slice
- * in onDrawForeground (over the title bar). Identical dest ⇒ the y=0 seam lines
- * up invisibly. Until the video is ready we fall back to the first lora's
- * preview image. */
-const BG_ALPHA = 0.4;                  // background opacity
-const BG_BASE = "#141414";             // opaque base painted under the image (matches --lb-bg)
-const _bgCache = {};                   // lora name -> HTMLImageElement
-function _titleH() { return (typeof LiteGraph !== "undefined" && LiteGraph.NODE_TITLE_HEIGHT) || 30; }
-function bgImageFor(node) {
-    const rows = node._lbRows || [];
-    let name = null;
-    for (const r of rows) { if (r && r.name && r.name !== "None") { name = r.name; break; } }
-    if (!name) return null;
-    let im = _bgCache[name];
-    if (!im) {
-        im = new Image();
-        _bgCache[name] = im;
-        im.onload = () => { im._ok = true; node.setDirtyCanvas(true, true); };
-        im.onerror = () => { im._err = true; };
-        im.src = "/lorabox/preview?file=" + encodeURIComponent(name);
-        return null;
-    }
-    return im._ok ? im : null;
-}
-function drawCover(ctx, src, dx, dy, dw, dh) {
-    const iw = src.videoWidth || src.naturalWidth, ih = src.videoHeight || src.naturalHeight;
-    if (!iw || !ih) return;
-    const s = Math.max(dw / iw, dh / ih);   // cover: fill dest, crop overflow
-    const cw = dw / s, ch = dh / s;
-    ctx.drawImage(src, (iw - cw) / 2, (ih - ch) / 2, cw, ch, dx, dy, dw, dh);
-}
-let VIDEO = null;
-function ensureVideo() {
-    if (VIDEO) return VIDEO;
-    const v = document.createElement("video");
-    v.src = new URL("./katosik_loop.mp4", import.meta.url).href;
-    v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
-    v.play().catch(() => {});
-    VIDEO = v;
-    const pump = () => {
-        if (app.canvas) app.canvas.setDirty(true, true);   // repaint to show next frame
-        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(pump);
-        else requestAnimationFrame(pump);
-    };
-    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(pump);
-    else requestAnimationFrame(pump);
-    return v;
-}
-function bgSource(node) {
-    const v = ensureVideo();
-    if (v && v.readyState >= 2 && v.videoWidth) return v;   // animated loop once ready
-    return bgImageFor(node);                                 // static preview until then
-}
-function drawBgSlice(node, ctx, region) {
-    if (node.flags && node.flags.collapsed) return;
-    const src = bgSource(node);
-    if (!src) return;
-    const W = node.size[0], bodyH = node.size[1], tH = _titleH(), totalH = tH + bodyH;
-    ctx.save();
-    ctx.beginPath();
-    if (region === "title") ctx.rect(0, -tH, W, tH);   // title-bar strip
-    else ctx.rect(0, 0, W, bodyH);                      // body
-    ctx.clip();
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = BG_BASE;
-    ctx.fillRect(0, -tH, W, totalH);
-    ctx.globalAlpha = BG_ALPHA;
-    drawCover(ctx, src, 0, -tH, W, totalH);            // SAME dest rect in both
-    ctx.restore();
-    // the opaque base covers the title text in the title strip — redraw it
-    if (region === "title" && node.title) {
-        ctx.save();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = "#e8e8e8";
-        ctx.font = "14px Arial";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(node.title, 18, -tH / 2);
-        ctx.restore();
-    }
-}
-
 let LORA_LIST = null;
 let LORA_LIST_PROMISE = null;
 let LORA_CATEGORIES = null;
@@ -956,7 +870,7 @@ app.registerExtension({
             count.className = "lb-count";
             node._lbCount = count;
             const gear = document.createElement("button");
-            gear.className = "lb-gear"; gear.innerHTML = GEAR_SVG; gear.title = "options";
+            gear.className = "lb-gear"; gear.innerHTML = GEAR_SVG; gear.title = "options"; gear.setAttribute("aria-label", "options");
             actions.append(count, gear);
             head.append(title, actions);
             inner.appendChild(head);
@@ -1014,7 +928,7 @@ app.registerExtension({
                 mkOrow("Mute all", muteSw, "Skip every LoRA and pass the prompt through untouched"),
                 mkOrow("Model + Clip", sepSw, "Separate model and clip strengths per LoRA"),
                 sec,
-                mkOrow("Set at start of prompt", sel, "Where LoRA trigger words merge into a connected prompt"),
+                mkOrow("Trigger position", sel, "Where LoRA trigger words merge into a connected prompt"),
                 mkOrow("Sep", delim, "Delimiter between prompt and trigger words"),
                 hint,
             );
@@ -1083,8 +997,6 @@ app.registerExtension({
         nodeType.prototype.onDrawForeground = function (ctx) {
             onDrawForeground && onDrawForeground.apply(this, arguments);
             fitRootWidth(this);
-            // (looping video / preview background removed — it animated and hurt
-            // the readability of the panel; the node now uses its flat dark chrome.)
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -1291,6 +1203,8 @@ function renderRows(node) {
 
         const field = document.createElement("div");
         field.className = "lb-name"; field.title = row.name || "None"; field.tabIndex = 0;
+        field.setAttribute("role", "button"); field.setAttribute("aria-label", "choose a LoRA, current: " + (row.name && row.name !== "None" ? row.name : "none"));
+        field.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPicker(node, row, field); } };
         const txt = document.createElement("span");
         txt.className = "txt" + (!row.name || row.name === "None" ? " none" : "");
         txt.textContent = row.name && row.name !== "None" ? row.name : "Choose a LoRA…";
@@ -1301,12 +1215,12 @@ function renderRows(node) {
 
         const trig = document.createElement("button");
         trig.className = "lb-ico lb-more" + (row._open ? " on" : ""); trig.innerHTML = row._open ? MINUS_SVG : PLUS_SVG;
-        trig.title = "доп. параметры — триггер-слова этой LoRA";
+        trig.title = "trigger words for this LoRA"; trig.setAttribute("aria-label", "trigger words for this LoRA");
         trig.onclick = (e) => { e.stopPropagation(); row._open = !row._open; renderRows(node); sizeNode(node); };
         stop(trig);
 
         const del = document.createElement("button");
-        del.className = "lb-ico lb-del"; del.innerHTML = X_SVG; del.title = "remove this LoRA";
+        del.className = "lb-ico lb-del"; del.innerHTML = X_SVG; del.title = "remove this LoRA"; del.setAttribute("aria-label", "remove this LoRA");
         del.onclick = (e) => {
             e.stopPropagation();
             const removed = node._lbRows[i], at = i;
@@ -1384,6 +1298,7 @@ function buildThumb(node, row) {
     const thumb = document.createElement("div");
     thumb.className = "lb-thumb";
     thumb.title = "Picture for this LoRA — click for options, drag to reorder";
+    thumb.setAttribute("role", "button"); thumb.setAttribute("aria-label", "picture for this LoRA — click for options");
     const img = document.createElement("img");
     const ph = document.createElement("div");
     ph.className = "lb-ph"; ph.textContent = "＋";
@@ -1414,7 +1329,7 @@ function buildThumb(node, row) {
     };
     const applyFile = async (f) => {
         if (!f || !f.type || !f.type.startsWith("image/")) return;
-        if (f.size > 8 * 1024 * 1024) { alert("Image too large (max 8 MB)."); return; }
+        if (f.size > 8 * 1024 * 1024) { showToast("Image too large (max 8 MB).", null, null, 3000); return; }
         const ok = await uploadPreview(row.name, f);
         if (ok) { evictPreview(row.name); refresh(); }
     };
@@ -1431,7 +1346,7 @@ function buildThumb(node, row) {
         const res = await generatePreview(row.name, kind);
         thumb.classList.remove("busy");
         if (res && res.ok) { evictPreview(row.name); refresh(); }
-        else alert("Preview generation failed: " + ((res && res.error) || "unknown error"));
+        else showToast("Preview generation failed: " + ((res && res.error) || "unknown error"), null, null, 5000);
     };
 
     thumb.onclick = (e) => {
@@ -1485,9 +1400,9 @@ function buildTrigEditor(node, row) {
     header.className = "lb-trig-head";
     const htxt = document.createElement("span"); htxt.className = "t"; htxt.textContent = "Triggers";
     const reset = document.createElement("button");
-    reset.className = "lb-ico"; reset.textContent = "↺"; reset.title = "reset to auto-detected";
+    reset.className = "lb-ico"; reset.textContent = "↺"; reset.title = "reset to auto-detected"; reset.setAttribute("aria-label", "reset to auto-detected");
     const chev = document.createElement("button");
-    chev.className = "lb-ico"; chev.innerHTML = CHEVRON_UP_SVG; chev.title = "collapse";
+    chev.className = "lb-ico"; chev.innerHTML = CHEVRON_UP_SVG; chev.title = "collapse"; chev.setAttribute("aria-label", "collapse");
     chev.onclick = (e) => { e.stopPropagation(); row._open = false; renderRows(node); sizeNode(node); };
     stop(chev);
     header.append(htxt, reset, chev);

@@ -8,6 +8,7 @@ the LoRA file.
 from __future__ import annotations
 
 import os
+import json
 import time
 import uuid
 import asyncio
@@ -23,7 +24,11 @@ except ImportError:
 
 log = logging.getLogger("LoraBox.preview")
 
-# Defaults match Console-Z-Workflow-v3-LoraBox on the Kiev machine.
+# The built-in "✨ Generate" pipeline renders a quick Z-Image Turbo test image.
+# These defaults target a stock Z-Image Turbo install; on any other setup either
+# install those models, drop a `preview_config.json` next to this file, or set
+# the LORABOX_PREVIEW_UNET / _CLIP / _VAE env vars to point at your own models.
+# (Upload / drag-and-drop and the auto/Civitai sidecar work regardless.)
 PREVIEW_CONFIG = {
     "unet_name": "z_image_turbo_bf16.safetensors",
     "clip_name": "qwen_3_4b.safetensors",
@@ -42,6 +47,50 @@ PREVIEW_CONFIG = {
     "lora_strength_clip": 0.9,
     "negative": "blurry ugly bad, deformed, watermark, text, low quality",
 }
+
+
+def _load_config() -> dict:
+    """PREVIEW_CONFIG, overlaid with preview_config.json (if present) and env."""
+    cfg = dict(PREVIEW_CONFIG)
+    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preview_config.json")
+    try:
+        if os.path.isfile(cfg_path):
+            with open(cfg_path, encoding="utf-8") as f:
+                user = json.load(f)
+            cfg.update({k: v for k, v in user.items() if k in PREVIEW_CONFIG})
+    except Exception as e:
+        log.warning("preview_config.json ignored: %s", e)
+    for env, key in (("LORABOX_PREVIEW_UNET", "unet_name"),
+                     ("LORABOX_PREVIEW_CLIP", "clip_name"),
+                     ("LORABOX_PREVIEW_VAE", "vae_name")):
+        v = os.environ.get(env)
+        if v:
+            cfg[key] = v
+    return cfg
+
+
+def _resolve_model(folders, configured) -> str | None:
+    """A real installed filename for `configured`, searched across `folders`.
+
+    Exact match wins; otherwise a case-insensitive substring match on the
+    configured stem (so "ae" finds "ae.safetensors", "z_image_turbo" finds a
+    differently-suffixed build). Returns None when nothing plausible exists, so
+    the caller can fail with a clear, actionable message instead of a KSampler
+    stack trace.
+    """
+    names = []
+    for folder in folders:
+        try:
+            names += list(folder_paths.get_filename_list(folder))
+        except Exception:
+            pass
+    if configured in names:
+        return configured
+    stem = os.path.splitext(os.path.basename(configured))[0].lower()
+    for n in names:
+        if stem and stem in n.lower():
+            return n
+    return None
 
 # Base prompts are shared across all loras so thumbnails are comparable.
 PREVIEW_PROMPTS = {
@@ -72,21 +121,40 @@ def build_preview_prompt(lora_name: str, kind: str = "character") -> dict:
     # trigger words go in front by default (stronger activation on the encoder)
     positive = merge_prompt(base, triggers, "beginning", ", ")
 
-    cfg = PREVIEW_CONFIG
+    cfg = _load_config()
+    unet = _resolve_model(("diffusion_models", "unet"), cfg["unet_name"])
+    clip = _resolve_model(("text_encoders", "clip"), cfg["clip_name"])
+    vae = _resolve_model(("vae",), cfg["vae_name"])
+    missing = []
+    if not unet:
+        missing.append("UNet/diffusion model '%s'" % cfg["unet_name"])
+    if not clip:
+        missing.append("CLIP/text-encoder '%s'" % cfg["clip_name"])
+    if not vae:
+        missing.append("VAE '%s'" % cfg["vae_name"])
+    if missing:
+        raise RuntimeError(
+            "Preview generation needs Z-Image Turbo models that aren't installed: "
+            + "; ".join(missing)
+            + ". Install them, or point LoRA Box at your own models via a "
+            "preview_config.json next to the node (or the LORABOX_PREVIEW_UNET / "
+            "_CLIP / _VAE env vars). You can always set a picture with Upload or "
+            "drag-and-drop instead.")
+
     return {
         "1": {
             "class_type": "UNETLoader",
-            "inputs": {"unet_name": cfg["unet_name"], "weight_dtype": "default"},
+            "inputs": {"unet_name": unet, "weight_dtype": "default"},
         },
         "2": {
             "class_type": "CLIPLoader",
             "inputs": {
-                "clip_name": cfg["clip_name"],
+                "clip_name": clip,
                 "type": cfg["clip_type"],
                 "device": "default",
             },
         },
-        "3": {"class_type": "VAELoader", "inputs": {"vae_name": cfg["vae_name"]}},
+        "3": {"class_type": "VAELoader", "inputs": {"vae_name": vae}},
         "4": {
             "class_type": "ModelSamplingAuraFlow",
             "inputs": {"model": ["1", 0], "shift": cfg["aura_shift"]},
