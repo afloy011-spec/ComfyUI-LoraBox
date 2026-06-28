@@ -474,15 +474,26 @@ function injectStyle() {
   font-size:11px; color:var(--lb-accent,#3b82f6); text-decoration:none; cursor:pointer;}
 .lorabox .lb-civitai:hover{text-decoration:underline;}
 
-/* presets block in the options panel: a select + small buttons */
-.lorabox .lb-preset{display:flex; align-items:center; gap:6px; min-height:34px;}
-.lorabox .lb-preset select{flex:1 1 auto; min-width:0;}
-.lorabox .lb-btn{height:28px; padding:0 10px; cursor:pointer; white-space:nowrap;
-  background:var(--comfy-menu-bg,#1c1c1c); color:#d8d8d8; border:1px solid var(--border-color,var(--lb-border,#2e2e2e));
-  border-radius:6px; font-size:11px; transition:background .12s, border-color .12s, color .12s;}
-.lorabox .lb-btn:hover{border-color:var(--lb-accent,#3b82f6); color:#fff;}
-.lorabox .lb-btn:active{transform:translateY(1px);}
-.lorabox .lb-btn.danger:hover{border-color:#b14; color:#ff8a8a;}
+/* presets: a single field (matches the LoRA picker) that opens a styled menu —
+   no native <select> popup, consistent with the rest of the panel */
+.lorabox .lb-preset{display:flex; min-height:34px; align-items:center;}
+.lorabox .lb-preset .lb-preset-field{width:100%; height:30px;}
+/* preset menu: click a name to load, the trash to delete, one Save row */
+.lb-pmenu{min-width:210px;}
+.lb-pmenu-empty{padding:4px 9px 8px; font-size:11px; font-style:italic; color:#888;}
+.lb-pitem{display:flex; align-items:center; gap:2px; border-radius:6px;}
+.lb-pitem-load{flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:8px; padding:8px 9px;
+  background:transparent; border:none; border-radius:6px; cursor:pointer; text-align:left; font-family:inherit;
+  font-size:12px; color:var(--input-text,#ddd);}
+.lb-pitem-load .chk{width:14px; height:14px; flex:0 0 auto; color:currentColor; visibility:hidden; display:flex;}
+.lb-pitem-load .lbl{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lb-pitem-load:hover{background:var(--lb-accent-soft,#1d3a5f); color:#fff;}
+.lb-pitem.cur .lb-pitem-load{color:#fff; font-weight:600;}
+.lb-pitem.cur .lb-pitem-load .chk{visibility:visible; color:var(--lb-accent,#3b82f6);}
+.lb-pitem.cur .lb-pitem-load:hover .chk{color:#fff;}
+.lb-pitem-del{flex:0 0 auto; width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+  background:transparent; border:none; border-radius:6px; cursor:pointer; color:#7a7a7a;}
+.lb-pitem-del:hover{background:#5b2b2b; color:#fff;}
 
 /* in-node prompt field — type the positive prompt right in the node */
 .lorabox .lb-prompt{display:flex; flex-direction:column; gap:6px;}
@@ -1051,6 +1062,7 @@ app.registerExtension({
             node._lbPos = "beginning";
             node._lbDelim = ", ";
             node._lbPrompt = "";
+            node._lbPresetName = null;
             node._lbOptsOpen = false;
             node._lbContentH = 150;
 
@@ -1135,38 +1147,24 @@ app.registerExtension({
                 (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
             node._lbSepCb = sepSw._cb;
 
-            // ---- presets: save / load / delete a curated LoRA stack ----
+            // ---- presets: one field that opens a styled load/save/delete menu ----
             const presetSec = document.createElement("div");
             presetSec.className = "lb-sec"; presetSec.textContent = "Presets";
             const presetRow = document.createElement("div");
             presetRow.className = "lb-preset";
-            const presetSel = document.createElement("select");
-            presetSel.title = "load a saved LoRA stack";
-            node._lbPresetSel = presetSel;
-            presetSel.onchange = () => { const n = presetSel.value; if (n && PRESETS && PRESETS[n]) applyPreset(node, PRESETS[n]); };
-            stop(presetSel); eatWheel(presetSel);
-            const saveBtn = document.createElement("button");
-            saveBtn.className = "lb-btn"; saveBtn.textContent = "Save…"; saveBtn.title = "save the current stack as a preset";
-            saveBtn.onclick = async (e) => {
-                e.stopPropagation();
-                const name = (window.prompt("Save current LoRA stack as preset:", presetSel.value || "") || "").trim();
-                if (!name) return;
-                const res = await savePreset(name, buildPresetData(node));
-                if (res.ok) { refreshPresetSel(node, name); showToast("Preset saved: " + name, null, null, 2000); }
-                else showToast("Save failed: " + (res.error || "?"), null, null, 3000);
-            };
-            stop(saveBtn);
-            const delBtn = document.createElement("button");
-            delBtn.className = "lb-btn danger"; delBtn.textContent = "Delete"; delBtn.title = "delete the selected preset";
-            delBtn.onclick = async (e) => {
-                e.stopPropagation();
-                const n = presetSel.value;
-                if (!n) { showToast("Pick a preset to delete first", null, null, 1800); return; }
-                await deletePreset(n); refreshPresetSel(node); showToast("Preset deleted: " + n, null, null, 2000);
-            };
-            stop(delBtn);
-            presetRow.append(presetSel, saveBtn, delBtn);
-            getPresets().then(() => refreshPresetSel(node));
+            const presetField = document.createElement("div");
+            presetField.className = "lb-name lb-preset-field"; presetField.tabIndex = 0;
+            presetField.setAttribute("role", "button"); presetField.setAttribute("aria-label", "presets — load or save");
+            presetField.title = "Load a saved LoRA stack, or save the current one";
+            const pfTxt = document.createElement("span"); pfTxt.className = "txt none"; pfTxt.textContent = "Load or save a preset…";
+            const pfCar = document.createElement("span"); pfCar.className = "car"; pfCar.textContent = "▼";
+            presetField.append(pfTxt, pfCar);
+            node._lbPresetFieldTxt = pfTxt;
+            presetField.onclick = (e) => { e.stopPropagation(); openPresetMenu(node, presetField); };
+            presetField.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPresetMenu(node, presetField); } };
+            stop(presetField);
+            presetRow.append(presetField);
+            getPresets().then(() => updatePresetField(node));
 
             const sec = document.createElement("div");
             sec.className = "lb-sec"; sec.textContent = "Triggers";
@@ -1484,16 +1482,87 @@ function applyPreset(node, data) {
     renderRows(node); sizeNode(node); serialize(node); updateActiveCount(node);
 }
 
-function refreshPresetSel(node, selectName) {
-    const sel = node._lbPresetSel;
-    if (!sel) return;
+// Reflect the loaded preset name on the field (placeholder when none).
+function updatePresetField(node) {
+    const t = node._lbPresetFieldTxt;
+    if (!t) return;
+    const n = node._lbPresetName;
+    t.textContent = n || "Load or save a preset…";
+    t.classList.toggle("none", !n);
+}
+
+/* The presets dropdown, styled like the rest of the panel (not a native
+ * <select>): each row = click the name to LOAD, click the trash to DELETE; a
+ * single "Save current…" row at the bottom. One obvious click per action. */
+function openPresetMenu(node, anchor) {
+    closeMenu();
+    const m = document.createElement("div");
+    m.className = "lb-menu lb-pmenu";
+    const head = document.createElement("div");
+    head.className = "lb-menu-head"; head.textContent = "Presets";
+    m.appendChild(head);
+
     const names = Object.keys(PRESETS || {}).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-    sel.innerHTML = "";
-    const ph = document.createElement("option");
-    ph.value = ""; ph.textContent = names.length ? "— load preset… —" : "— no presets —";
-    sel.appendChild(ph);
-    names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
-    sel.value = (selectName && names.includes(selectName)) ? selectName : "";
+    if (!names.length) {
+        const e = document.createElement("div");
+        e.className = "lb-pmenu-empty"; e.textContent = "No presets yet — save the current stack below.";
+        m.appendChild(e);
+    } else {
+        names.forEach((n) => {
+            const row = document.createElement("div");
+            row.className = "lb-pitem" + (n === node._lbPresetName ? " cur" : "");
+            const load = document.createElement("button");
+            load.className = "lb-pitem-load"; load.title = "load \"" + n + "\"";
+            const chk = document.createElement("span"); chk.className = "chk"; chk.innerHTML = CHECK_SVG;
+            const lbl = document.createElement("span"); lbl.className = "lbl"; lbl.textContent = n;
+            load.append(chk, lbl);
+            load.onmousedown = (e) => {
+                e.preventDefault(); e.stopPropagation(); closeMenu();
+                node._lbPresetName = n;
+                if (PRESETS[n]) applyPreset(node, PRESETS[n]);
+                updatePresetField(node);
+            };
+            const del = document.createElement("button");
+            del.className = "lb-pitem-del"; del.innerHTML = TRASH_SVG;
+            del.title = "delete \"" + n + "\""; del.setAttribute("aria-label", "delete preset " + n);
+            del.onmousedown = async (e) => {
+                e.preventDefault(); e.stopPropagation();
+                await deletePreset(n);
+                if (node._lbPresetName === n) { node._lbPresetName = null; updatePresetField(node); }
+                openPresetMenu(node, anchor);   // reopen so the list refreshes in place
+            };
+            row.append(load, del);
+            m.appendChild(row);
+        });
+    }
+
+    const sep = document.createElement("div"); sep.className = "lb-menu-sep"; m.appendChild(sep);
+    const save = document.createElement("button");
+    save.className = "lb-menu-item";
+    const sic = document.createElement("span"); sic.className = "ic"; sic.innerHTML = PLUS_SVG;
+    const st = document.createElement("span"); st.className = "t"; st.textContent = "Save current as preset…";
+    save.append(sic, st);
+    save.onmousedown = async (e) => {
+        e.preventDefault(); e.stopPropagation(); closeMenu();
+        const name = (window.prompt("Save current LoRA stack as preset:", node._lbPresetName || "") || "").trim();
+        if (!name) return;
+        const res = await savePreset(name, buildPresetData(node));
+        if (res.ok) { node._lbPresetName = name; updatePresetField(node); showToast("Preset saved: " + name, null, null, 2000); }
+        else showToast("Save failed: " + (res.error || "?"), null, null, 3000);
+    };
+    m.appendChild(save);
+
+    stop(m);
+    document.body.appendChild(m);
+    const r = anchor.getBoundingClientRect();
+    m.style.minWidth = Math.max(r.width, 210) + "px";
+    let left = Math.min(r.left, window.innerWidth - m.offsetWidth - 8);
+    let top = r.bottom + 4;
+    if (top + m.offsetHeight > window.innerHeight - 8) top = r.top - m.offsetHeight - 4;
+    m.style.left = Math.max(8, left) + "px";
+    m.style.top = Math.max(8, top) + "px";
+    MENU = m;
+    setTimeout(() => document.addEventListener("pointerdown", onMenuDocDown, true), 0);
 }
 
 function serialize(node) {
