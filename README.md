@@ -15,7 +15,15 @@ offering a one-row-per-LoRA design.
 - A live **active count** in the header; **mute all** survives a workflow save
   without wiping per-row on/off state.
 - Drag-to-reorder by grabbing a card's **thumbnail**; duplicate LoRAs get an
-  explicit "duplicate" badge.
+  explicit "duplicate" badge, and a LoRA whose file is gone (renamed / moved)
+  gets a red **"missing file"** badge instead of being silently skipped.
+- **Stack presets**: save the current LoRA combination (LoRAs + weights + merge
+  settings) under a name and reload it in any workflow — from the ⚙ disclosure.
+- **Solo**: right-click a row's on/off switch to mute every *other* LoRA while
+  you test one; right-click again to restore.
+- **Per-LoRA notes + Civitai link**: jot what a LoRA does / its recommended
+  weight in the trigger panel (the note belongs to the LoRA, shown in every Lora
+  Box); with Civitai lookups enabled, an *Open on Civitai* link appears too.
 - **Reversible delete**: removing a row shows an *Undo* toast.
 - Per-row trigger words: auto-detected from real safetensors trigger fields
   (not noisy training tags), fully editable, resettable to auto. Merged straight

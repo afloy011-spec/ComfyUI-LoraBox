@@ -378,5 +378,87 @@ class PromptMergeTest(unittest.TestCase):
                          "a man walking, hat")
 
 
+class PresetTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        lora_box._PRESETS_PATH = os.path.join(self.tmp, "presets.json")
+        lora_box._PRESETS = None
+
+    def test_sanitize_keeps_only_owned_fields(self):
+        out = lora_box._sanitize_preset({
+            "rows": [{"on": True, "name": "a.safetensors", "sm": 0.8, "sc": 0.6,
+                      "trig": "x", "junk": 1}],
+            "pos": "beginning", "delim": " | ", "prompt": "should be dropped",
+        })
+        self.assertEqual(out["rows"][0],
+                         {"on": True, "name": "a.safetensors", "sm": 0.8, "sc": 0.6, "trig": "x"})
+        self.assertEqual(out["pos"], "beginning")
+        self.assertEqual(out["delim"], " | ")
+        self.assertNotIn("prompt", out)            # prompt is per-workflow, never saved
+
+    def test_sanitize_bad_input(self):
+        self.assertIsNone(lora_box._sanitize_preset("nope"))
+        self.assertIsNone(lora_box._sanitize_preset({"no_rows": 1}))
+
+    def test_sanitize_nan_strength_becomes_one(self):
+        out = lora_box._sanitize_preset({"rows": [{"name": "a", "sm": float("nan")}]})
+        self.assertEqual(out["rows"][0]["sm"], 1.0)
+
+    def test_sanitize_caps_row_count(self):
+        rows = [{"name": "a"} for _ in range(lora_box.MAX_PRESET_ROWS + 20)]
+        out = lora_box._sanitize_preset({"rows": rows})
+        self.assertEqual(len(out["rows"]), lora_box.MAX_PRESET_ROWS)
+
+    def test_save_load_roundtrip(self):
+        p = lora_box._load_presets()
+        p["My Look"] = lora_box._sanitize_preset({"rows": [{"name": "a", "sm": 1.0}]})
+        lora_box._save_presets()
+        lora_box._PRESETS = None                    # force re-read from disk
+        self.assertIn("My Look", lora_box._load_presets())
+
+
+class NoteTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        lora_box._NOTES_PATH = os.path.join(self.tmp, "notes.json")
+        lora_box._NOTES = None
+
+    def test_set_get_clear(self):
+        notes = lora_box._load_notes()
+        notes["a.safetensors"] = "trained on cats"
+        lora_box._save_notes()
+        lora_box._NOTES = None
+        self.assertEqual(lora_box._load_notes().get("a.safetensors"), "trained on cats")
+
+
+class CivitaiInfoTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.a = os.path.join(self.tmp, "a.safetensors")
+        _make_safetensors(self.a, {})
+        _LORAS.clear()
+        _LORAS["a.safetensors"] = self.a
+        lora_box._CIVITAI_INFO.clear()
+        lora_box._CIVITAI_INFO_MISS.clear()
+
+    def test_disabled_returns_empty(self):
+        os.environ.pop("LORABOX_CIVITAI", None)
+        self.assertEqual(lora_box._fetch_civitai_info("a.safetensors"), {})
+
+    def test_builds_model_url(self):
+        os.environ["LORABOX_CIVITAI"] = "1"
+        orig_sha, orig_get = lora_box._sha256, lora_box._http_get
+        lora_box._sha256 = lambda path: "deadbeef"
+        lora_box._http_get = lambda url, t: json.dumps(
+            {"modelId": 123, "id": 456, "trainedWords": ["foo", "bar"]}).encode()
+        try:
+            info = lora_box._fetch_civitai_info("a.safetensors")
+        finally:
+            lora_box._sha256, lora_box._http_get = orig_sha, orig_get
+            os.environ.pop("LORABOX_CIVITAI", None)
+        self.assertEqual(info["url"], "https://civitai.com/models/123?modelVersionId=456")
+        self.assertEqual(info["words"], ["foo", "bar"])
+
+
 if __name__ == "__main__":
     unittest.main()

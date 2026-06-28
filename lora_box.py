@@ -312,6 +312,101 @@ def category_for(name):
     return _auto_category(name)
 
 
+# ---- stack presets -------------------------------------------------------
+# A "preset" is a saved LoRA stack (the rows + merge position/delimiter) the user
+# can reuse in any workflow / any Lora Box. Stored by name in a small JSON next
+# to the node so it persists and is shared. The prompt itself is NOT saved — it's
+# per-workflow; a preset is the curated combination of LoRAs and their weights.
+_PRESETS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presets.json")
+_PRESETS = None
+MAX_PRESETS = 300
+MAX_PRESET_NAME = 60
+MAX_PRESET_ROWS = 64
+
+
+def _load_presets():
+    global _PRESETS
+    if _PRESETS is None:
+        try:
+            with open(_PRESETS_PATH, encoding="utf-8") as f:
+                d = json.load(f)
+            p = d.get("presets") if isinstance(d, dict) else None
+            _PRESETS = p if isinstance(p, dict) else {}
+        except Exception:
+            _PRESETS = {}
+    return _PRESETS
+
+
+def _save_presets():
+    try:
+        with open(_PRESETS_PATH, "w", encoding="utf-8") as f:
+            json.dump({"presets": _PRESETS}, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        log.warning("could not save presets.json: %s", e)
+
+
+def _sanitize_preset(payload):
+    """Keep only the fields a preset owns, bounded, from arbitrary client JSON."""
+    if not isinstance(payload, dict):
+        return None
+    rows_in = payload.get("rows")
+    if not isinstance(rows_in, list):
+        return None
+    rows = []
+    for r in rows_in[:MAX_PRESET_ROWS]:
+        if not isinstance(r, dict):
+            continue
+        row = {
+            "on": bool(r.get("on", True)),
+            "name": str(r.get("name", "None"))[:300],
+        }
+        for k in ("sm", "sc"):
+            try:
+                v = float(r.get(k, 1.0))
+                row[k] = v if math.isfinite(v) else 1.0
+            except (TypeError, ValueError):
+                row[k] = 1.0
+        if isinstance(r.get("trig"), str):
+            row["trig"] = r["trig"][:2000]
+        rows.append(row)
+    out = {"rows": rows}
+    if isinstance(payload.get("pos"), str):
+        out["pos"] = payload["pos"][:20]
+    if isinstance(payload.get("delim"), str):
+        out["delim"] = payload["delim"][:20]
+    return out
+
+
+# ---- per-lora notes ------------------------------------------------------
+# A free-text note that belongs to the LoRA (not a node), stored by name so it
+# shows in every Lora Box. Useful for "what is this / recommended weight / where
+# from". Lives in notes.json next to the node.
+_NOTES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "notes.json")
+_NOTES = None
+MAX_NOTE_LEN = 2000
+
+
+def _load_notes():
+    global _NOTES
+    if _NOTES is None:
+        try:
+            with open(_NOTES_PATH, encoding="utf-8") as f:
+                d = json.load(f)
+            n = d.get("notes") if isinstance(d, dict) else None
+            _NOTES = n if isinstance(n, dict) else {}
+        except Exception:
+            _NOTES = {}
+    return _NOTES
+
+
+def _save_notes():
+    try:
+        with open(_NOTES_PATH, "w", encoding="utf-8") as f:
+            json.dump({"notes": _NOTES}, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        log.warning("could not save notes.json: %s", e)
+
+
 def _word_in_text(word, text):
     """True if `word` appears in `text` on word boundaries (case-insensitive).
 
@@ -505,6 +600,45 @@ def _fetch_civitai_triggers(name):
     return []
 
 
+_CIVITAI_INFO = {}           # path -> {"url":..., "words":[...]}
+_CIVITAI_INFO_MISS = set()
+
+
+def _fetch_civitai_info(name):
+    """Resolve a lora's Civitai model page URL + trained words by file hash.
+
+    Blocking (hash + network); call OFF the event loop. Opt-in (same gate as the
+    other Civitai lookups) and cached. Returns {} when disabled / not found.
+    """
+    if not _civitai_enabled():
+        return {}
+    path = _safe_lora_path(name)
+    if not path or path in _CIVITAI_INFO_MISS:
+        return {}
+    if path in _CIVITAI_INFO:
+        return _CIVITAI_INFO[path]
+    try:
+        sha = _sha256(path)
+        meta = json.loads(_http_get(
+            "https://civitai.com/api/v1/model-versions/by-hash/" + sha, 12).decode("utf-8"))
+        model_id = meta.get("modelId")
+        ver_id = meta.get("id")
+        if not model_id:
+            _CIVITAI_INFO_MISS.add(path)
+            return {}
+        url = "https://civitai.com/models/%s" % model_id
+        if ver_id:
+            url += "?modelVersionId=%s" % ver_id
+        words = [str(w).strip() for w in (meta.get("trainedWords") or []) if str(w).strip()][:50]
+        info = {"url": url, "words": words}
+        _CIVITAI_INFO[path] = info
+        return info
+    except Exception as e:
+        _CIVITAI_INFO_MISS.add(path)
+        log.info("Civitai info fetch failed for %s: %s", name, e)
+        return {}
+
+
 # Optional API routes so the UI can show trigger words / preview images.
 try:
     from server import PromptServer
@@ -565,6 +699,69 @@ try:
             cats.pop(name, None)                # empty -> revert to auto-detect
         _save_usercats()
         return web.json_response({"ok": True, "name": name, "group": group or category_for(name)})
+
+    @PromptServer.instance.routes.get("/lorabox/presets")
+    async def _lorabox_presets_get(request):
+        return web.json_response({"presets": dict(_load_presets())})
+
+    @PromptServer.instance.routes.post("/lorabox/presets")
+    async def _lorabox_presets_post(request):
+        """Save (overwrite) a named stack preset."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "bad json"}, status=400)
+        name = str(body.get("name", "") or "").strip()[:MAX_PRESET_NAME]
+        if not name:
+            return web.json_response({"ok": False, "error": "empty name"}, status=400)
+        data = _sanitize_preset(body.get("data"))
+        if data is None:
+            return web.json_response({"ok": False, "error": "bad preset"}, status=400)
+        presets = _load_presets()
+        if name not in presets and len(presets) >= MAX_PRESETS:
+            return web.json_response({"ok": False, "error": "too many presets"}, status=400)
+        presets[name] = data
+        _save_presets()
+        return web.json_response({"ok": True, "name": name})
+
+    @PromptServer.instance.routes.delete("/lorabox/presets")
+    async def _lorabox_presets_del(request):
+        name = str(request.query.get("name", "") or "").strip()
+        presets = _load_presets()
+        existed = presets.pop(name, None) is not None
+        if existed:
+            _save_presets()
+        return web.json_response({"ok": existed})
+
+    @PromptServer.instance.routes.get("/lorabox/note")
+    async def _lorabox_note_get(request):
+        name = request.query.get("file", "")
+        return web.json_response({"file": name, "note": _load_notes().get(name, "")})
+
+    @PromptServer.instance.routes.post("/lorabox/note")
+    async def _lorabox_note_post(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "bad json"}, status=400)
+        name = body.get("name", "")
+        if not _safe_lora_path(name):           # only real registered loras
+            return web.json_response({"ok": False, "error": "unknown lora"}, status=400)
+        note = str(body.get("note", "") or "")[:MAX_NOTE_LEN]
+        notes = _load_notes()
+        if note.strip():
+            notes[name] = note
+        else:
+            notes.pop(name, None)               # empty clears it
+        _save_notes()
+        return web.json_response({"ok": True, "note": note})
+
+    @PromptServer.instance.routes.get("/lorabox/civitai")
+    async def _lorabox_civitai_get(request):
+        """Civitai model-page URL + trained words for a lora (opt-in; off → {})."""
+        file = request.query.get("file", "")
+        info = await asyncio.get_event_loop().run_in_executor(None, _fetch_civitai_info, file)
+        return web.json_response({"file": file, **(info or {})})
 
     @PromptServer.instance.routes.get("/lorabox/preview")
     async def _lorabox_preview_get(request):

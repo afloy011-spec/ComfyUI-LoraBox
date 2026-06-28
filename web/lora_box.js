@@ -30,7 +30,7 @@ const PAD_V = 18, HEAD_H = 40, OPTS_H = 208, CARD_BASE = 80, SEP_EXTRA = 26, ADD
 // (header 16 + gap 8 + border 2) + TRIG_PAD (panel padding 12+12) + the
 // growable textarea height. These MUST all be summed in sizeNode or the panel
 // clips off the bottom of the node.
-const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 24, TRIG_MIN = 28;
+const TRIG_GAP = 8, TRIG_HEAD = 26, TRIG_PAD = 24, TRIG_MIN = 28, TRIG_FALLBACK = 150;
 // In-node prompt field: min textarea height; the wrap is measured in sizeNode
 // (with PROMPT_FALLBACK if measurement isn't ready yet).
 const PROMPT_MIN = 40, PROMPT_FALLBACK = 78;
@@ -108,6 +108,59 @@ async function fetchAuto(name) {
         const j = await r.json();
         return j.words || [];
     } catch (e) { return []; }
+}
+
+/* ---- stack presets ------------------------------------------------------- */
+let PRESETS = null;   // { name: {rows, pos, delim} }
+async function getPresets(force) {
+    if (PRESETS && !force) return PRESETS;
+    try {
+        const r = await api.fetchApi("/lorabox/presets");
+        const j = await r.json();
+        PRESETS = j.presets || {};
+    } catch (e) { PRESETS = PRESETS || {}; }
+    return PRESETS;
+}
+async function savePreset(name, data) {
+    try {
+        const r = await api.fetchApi("/lorabox/presets", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, data }),
+        });
+        const j = await r.json();
+        if (j.ok) await getPresets(true);
+        return j;
+    } catch (e) { return { ok: false, error: String(e) }; }
+}
+async function deletePreset(name) {
+    try {
+        await api.fetchApi("/lorabox/presets?name=" + encodeURIComponent(name), { method: "DELETE" });
+        await getPresets(true);
+        return true;
+    } catch (e) { return false; }
+}
+
+/* ---- per-lora notes + Civitai link --------------------------------------- */
+async function getNote(name) {
+    try {
+        const r = await api.fetchApi("/lorabox/note?file=" + encodeURIComponent(name || ""));
+        const j = await r.json();
+        return j.note || "";
+    } catch (e) { return ""; }
+}
+async function saveNote(name, note) {
+    try {
+        await api.fetchApi("/lorabox/note", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, note }),
+        });
+    } catch (e) {}
+}
+async function getCivitai(name) {
+    try {
+        const r = await api.fetchApi("/lorabox/civitai?file=" + encodeURIComponent(name || ""));
+        return await r.json();   // { url?, words? } — empty when opt-in is off / not found
+    } catch (e) { return {}; }
 }
 
 /* ---- per-lora preview images -------------------------------------------- */
@@ -317,6 +370,13 @@ function injectStyle() {
 .lorabox .lb-card.lb-dup::after{content:"duplicate"; position:absolute; top:-7px; right:10px;
   font-size:8px; line-height:1.4; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
   color:#241a0c; background:#d8932f; padding:1px 6px; border-radius:5px; pointer-events:none;}
+/* missing file: the referenced .safetensors is no longer in the loras list
+   (renamed / moved / deleted) — flag it so the LoRA isn't silently skipped */
+.lorabox .lb-card.lb-missing{border-color:#a33;}
+.lorabox .lb-card.lb-missing::before{content:"missing file"; position:absolute; top:-7px; left:12px;
+  font-size:8px; line-height:1.4; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
+  color:#2a0d0d; background:#e5534b; padding:1px 6px; border-radius:5px; pointer-events:none; z-index:1;}
+.lorabox .lb-card.lb-soloed{box-shadow:0 0 0 1px var(--lb-accent,#3b82f6) inset;}
 .lorabox .lb-card.lb-dragging{opacity:.45;}
 .lorabox .lb-card.lb-drop-before{box-shadow:inset 0 2px 0 0 var(--lb-accent,#3b82f6);}
 .lorabox .lb-card.lb-drop-after{box-shadow:inset 0 -2px 0 0 var(--lb-accent,#3b82f6);}
@@ -402,6 +462,27 @@ function injectStyle() {
   outline:none; font-family:inherit;}
 .lorabox .lb-trig-in:focus{border-color:var(--lb-accent,#3b82f6);}
 .lorabox .lb-trig-in::placeholder{color:#667;}
+/* per-lora note + a Civitai link, shown under the trigger editor */
+.lorabox .lb-note-lbl{font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase;
+  color:#6a6a6a; margin-top:4px;}
+.lorabox .lb-note-in{width:100%; min-height:26px; padding:7px 10px; resize:none; overflow:hidden;
+  background:var(--lb-field,#0d0d0d); color:#dcdcdc; border:1px solid var(--border-color,var(--lb-border,#2e2e2e));
+  border-radius:6px; font-size:11px; line-height:1.4; outline:none; font-family:inherit;}
+.lorabox .lb-note-in:focus{border-color:var(--lb-accent,#3b82f6);}
+.lorabox .lb-note-in::placeholder{color:#667;}
+.lorabox .lb-civitai{display:inline-flex; align-items:center; gap:5px; align-self:flex-start; margin-top:2px;
+  font-size:11px; color:var(--lb-accent,#3b82f6); text-decoration:none; cursor:pointer;}
+.lorabox .lb-civitai:hover{text-decoration:underline;}
+
+/* presets block in the options panel: a select + small buttons */
+.lorabox .lb-preset{display:flex; align-items:center; gap:6px; min-height:34px;}
+.lorabox .lb-preset select{flex:1 1 auto; min-width:0;}
+.lorabox .lb-btn{height:28px; padding:0 10px; cursor:pointer; white-space:nowrap;
+  background:var(--comfy-menu-bg,#1c1c1c); color:#d8d8d8; border:1px solid var(--border-color,var(--lb-border,#2e2e2e));
+  border-radius:6px; font-size:11px; transition:background .12s, border-color .12s, color .12s;}
+.lorabox .lb-btn:hover{border-color:var(--lb-accent,#3b82f6); color:#fff;}
+.lorabox .lb-btn:active{transform:translateY(1px);}
+.lorabox .lb-btn.danger:hover{border-color:#b14; color:#ff8a8a;}
 
 /* in-node prompt field — type the positive prompt right in the node */
 .lorabox .lb-prompt{display:flex; flex-direction:column; gap:6px;}
@@ -1054,6 +1135,39 @@ app.registerExtension({
                 (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
             node._lbSepCb = sepSw._cb;
 
+            // ---- presets: save / load / delete a curated LoRA stack ----
+            const presetSec = document.createElement("div");
+            presetSec.className = "lb-sec"; presetSec.textContent = "Presets";
+            const presetRow = document.createElement("div");
+            presetRow.className = "lb-preset";
+            const presetSel = document.createElement("select");
+            presetSel.title = "load a saved LoRA stack";
+            node._lbPresetSel = presetSel;
+            presetSel.onchange = () => { const n = presetSel.value; if (n && PRESETS && PRESETS[n]) applyPreset(node, PRESETS[n]); };
+            stop(presetSel); eatWheel(presetSel);
+            const saveBtn = document.createElement("button");
+            saveBtn.className = "lb-btn"; saveBtn.textContent = "Save…"; saveBtn.title = "save the current stack as a preset";
+            saveBtn.onclick = async (e) => {
+                e.stopPropagation();
+                const name = (window.prompt("Save current LoRA stack as preset:", presetSel.value || "") || "").trim();
+                if (!name) return;
+                const res = await savePreset(name, buildPresetData(node));
+                if (res.ok) { refreshPresetSel(node, name); showToast("Preset saved: " + name, null, null, 2000); }
+                else showToast("Save failed: " + (res.error || "?"), null, null, 3000);
+            };
+            stop(saveBtn);
+            const delBtn = document.createElement("button");
+            delBtn.className = "lb-btn danger"; delBtn.textContent = "Delete"; delBtn.title = "delete the selected preset";
+            delBtn.onclick = async (e) => {
+                e.stopPropagation();
+                const n = presetSel.value;
+                if (!n) { showToast("Pick a preset to delete first", null, null, 1800); return; }
+                await deletePreset(n); refreshPresetSel(node); showToast("Preset deleted: " + n, null, null, 2000);
+            };
+            stop(delBtn);
+            presetRow.append(presetSel, saveBtn, delBtn);
+            getPresets().then(() => refreshPresetSel(node));
+
             const sec = document.createElement("div");
             sec.className = "lb-sec"; sec.textContent = "Triggers";
 
@@ -1082,6 +1196,7 @@ app.registerExtension({
             opts.append(
                 mkOrow("Mute all", muteSw, "Skip every LoRA and pass the prompt through untouched"),
                 mkOrow("Model + Clip", sepSw, "Separate model and clip strengths per LoRA"),
+                presetSec, presetRow,
                 sec,
                 mkOrow("Trigger position", sel, "Where LoRA trigger words merge into a connected prompt"),
                 mkOrow("Sep", delim, "Delimiter between prompt and trigger words"),
@@ -1208,6 +1323,41 @@ function markDuplicates(node) {
     });
 }
 
+/* Flag rows whose .safetensors is no longer registered (renamed / moved /
+ * deleted), so a LoRA that silently won't apply is visible. Runs only once the
+ * lora list is known; if it isn't yet, fetch then re-mark. */
+function markMissing(node) {
+    const cards = node._lbList ? [...node._lbList.querySelectorAll(".lb-card")] : [];
+    if (!LORA_LIST) { getLoraList().then(() => markMissing(node)); return; }
+    const known = new Set(LORA_LIST);
+    cards.forEach((el, i) => {
+        const r = node._lbRows[i];
+        el.classList.toggle("lb-missing", !!(r && r.name && r.name !== "None" && !known.has(r.name)));
+    });
+}
+
+/* ---- solo: isolate one LoRA while testing -------------------------------
+ * Right-click a row's on/off switch to mute every OTHER LoRA; right-click the
+ * soloed row again to restore the previous on/off state. Non-destructive: the
+ * pre-solo on-flags are snapshotted in memory. */
+function soloRow(node, index) {
+    const rows = node._lbRows;
+    if (index < 0 || index >= rows.length) return;
+    const onCount = rows.filter((r) => r.on).length;
+    const isSoloed = rows[index].on && onCount === 1;
+    if (isSoloed && node._lbSoloSnap && node._lbSoloSnap.length === rows.length) {
+        rows.forEach((r, i) => { r.on = !!node._lbSoloSnap[i]; });
+        node._lbSoloSnap = null;
+        showToast("Solo off — restored", null, null, 1800);
+    } else {
+        node._lbSoloSnap = rows.map((r) => !!r.on);
+        rows.forEach((r, i) => { r.on = i === index; });
+        const nm = rows[index].name && rows[index].name !== "None" ? rows[index].name : "this LoRA";
+        showToast("Soloed " + nm + " — right-click again to restore", null, null, 2600);
+    }
+    renderRows(node); serialize(node); updateActiveCount(node);
+}
+
 /* ---- drag-to-reorder (native HTML5 DnD) ---------------------------------
  * Uses the browser's drag-and-drop, not pointermove, so the node itself can't
  * be dragged (pointerdown is already stopped at the container). Only the grip
@@ -1302,6 +1452,50 @@ function initFromData(node) {
     renderRows(node); sizeNode(node); serialize(node);
 }
 
+/* the part of a node's state a preset owns: the curated stack + merge settings
+ * (NOT the prompt — that's per-workflow, and NOT mute — that's transient). */
+function buildPresetData(node) {
+    return {
+        rows: node._lbRows.map((r) => {
+            const o = { on: !!r.on, name: r.name, sm: r.sm, sc: node._lbSep ? r.sc : r.sm };
+            if (typeof r.trig === "string") o.trig = r.trig;
+            return o;
+        }),
+        pos: node._lbPos || "beginning",
+        delim: node._lbDelim != null ? node._lbDelim : ", ",
+    };
+}
+
+function applyPreset(node, data) {
+    if (!data || !Array.isArray(data.rows)) return;
+    node._lbRows = data.rows.map((r) => {
+        const o = {
+            on: r.on !== false, name: r.name || "None",
+            sm: clampV(r.sm != null ? r.sm : 1.0), sc: clampV(r.sc != null ? r.sc : 1.0),
+        };
+        if (typeof r.trig === "string") o.trig = r.trig;
+        return o;
+    });
+    if (typeof data.pos === "string") { node._lbPos = data.pos; if (node._lbPosSel) node._lbPosSel.value = data.pos; }
+    if (typeof data.delim === "string") { node._lbDelim = data.delim; if (node._lbDelimIn) node._lbDelimIn.value = data.delim; }
+    node._lbSep = node._lbRows.some((r) => r.sc !== r.sm);
+    if (node._lbSepCb) node._lbSepCb.checked = node._lbSep;
+    node._lbSoloSnap = null;
+    renderRows(node); sizeNode(node); serialize(node); updateActiveCount(node);
+}
+
+function refreshPresetSel(node, selectName) {
+    const sel = node._lbPresetSel;
+    if (!sel) return;
+    const names = Object.keys(PRESETS || {}).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    sel.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = ""; ph.textContent = names.length ? "— load preset… —" : "— no presets —";
+    sel.appendChild(ph);
+    names.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+    sel.value = (selectName && names.includes(selectName)) ? selectName : "";
+}
+
 function serialize(node) {
     if (!node._lbDataW) return;
     const rows = node._lbRows.map((r) => {
@@ -1350,18 +1544,21 @@ function renderRows(node) {
         return;
     }
 
+    const soloActive = !!node._lbSoloSnap && node._lbRows.filter((r) => r.on).length === 1;
     node._lbRows.forEach((row, i) => {
         const card = document.createElement("div");
-        card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "") + (node._lbSep ? " lb-sep" : "");
+        card.className = "lb-card" + (rowOff(node, row) ? " lb-off" : "") + (node._lbSep ? " lb-sep" : "")
+            + (soloActive && row.on ? " lb-soloed" : "");
 
         // ── line 1: switch · name (borderless text) · bookmark · delete ──
         const l1 = document.createElement("div");
         l1.className = "lb-l1";
 
-        const sw = mkSwitch(row.on, "enable / disable this LoRA", (v) => {
+        const sw = mkSwitch(row.on, "enable / disable this LoRA  ·  right-click: solo (mute the others)", (v) => {
             row.on = v; card.classList.toggle("lb-off", rowOff(node, row));
             updateActiveCount(node); serialize(node);
         });
+        sw.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); soloRow(node, i); };
 
         const field = document.createElement("div");
         field.className = "lb-name"; field.title = row.name || "None"; field.tabIndex = 0;
@@ -1448,6 +1645,7 @@ function renderRows(node) {
     });
 
     markDuplicates(node);
+    markMissing(node);
     updateActiveCount(node);
 }
 
@@ -1559,6 +1757,7 @@ function buildThumb(node, row) {
 function buildTrigEditor(node, row) {
     const wrap = document.createElement("div");
     wrap.className = "lb-trig";
+    row._trigEl = wrap;   // sizeNode measures this panel's real height when open
 
     const header = document.createElement("div");
     header.className = "lb-trig-head";
@@ -1607,6 +1806,42 @@ function buildTrigEditor(node, row) {
     };
     stop(ta); eatWheel(ta); stop(reset);
     wrap.append(header, ta);
+
+    // ---- per-lora note + Civitai link (belong to the LoRA, shared across boxes) ----
+    if (row.name && row.name !== "None") {
+        const nlbl = document.createElement("div");
+        nlbl.className = "lb-note-lbl"; nlbl.textContent = "Note";
+        const note = document.createElement("textarea");
+        note.className = "lb-note-in"; note.rows = 1;
+        note.placeholder = "what it does, recommended weight, source…";
+        const growNote = () => {
+            note.style.height = "auto";
+            note.style.height = Math.max(26, note.scrollHeight) + "px";
+            sizeNode(node);
+        };
+        getNote(row.name).then((v) => { if (document.body.contains(note)) { note.value = v || ""; growNote(); } });
+        let noteT = null;
+        note.oninput = () => {
+            growNote();
+            if (noteT) clearTimeout(noteT);
+            noteT = setTimeout(() => saveNote(row.name, note.value), 500);   // debounce writes
+        };
+        note.onchange = () => { if (noteT) { clearTimeout(noteT); noteT = null; } saveNote(row.name, note.value); };
+        stop(note); eatWheel(note);
+        wrap.append(nlbl, note);
+
+        // appears only when Civitai lookups are enabled AND the lora resolves
+        getCivitai(row.name).then((info) => {
+            if (info && info.url && document.body.contains(wrap)) {
+                const a = document.createElement("a");
+                a.className = "lb-civitai"; a.href = info.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+                a.textContent = "↗ Open on Civitai";
+                stop(a);
+                wrap.append(a);
+                sizeNode(node);
+            }
+        });
+    }
     return wrap;
 }
 
@@ -1619,7 +1854,17 @@ function sizeNode(node) {
     // or the bottom card clips off the node.
     else {
         const cardBase = CARD_BASE + (node._lbSep ? SEP_EXTRA : 0);
-        listH = rows.reduce((a, r) => a + cardBase + (r._open ? TRIG_GAP + TRIG_HEAD + TRIG_PAD + (r._trigH || TRIG_MIN) : 0), 0) + (rows.length - 1) * GAP;
+        // An open trigger panel (triggers + note + optional Civitai link) is
+        // MEASURED from its real element height (it grows with content), so the
+        // card never clips; fall back to a constant until it's laid out.
+        listH = rows.reduce((a, r) => {
+            let h = cardBase;
+            if (r._open) {
+                const m = (r._trigEl && r._trigEl.offsetHeight) || 0;
+                h += TRIG_GAP + (m > 0 ? m : TRIG_FALLBACK);
+            }
+            return a + h;
+        }, 0) + (rows.length - 1) * GAP;
     }
     // The options panel's hint wraps to a variable number of lines with width,
     // so a fixed OPTS_H under-counts and shoves "+ Add LoRA" off the node. Measure

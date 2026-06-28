@@ -4,3 +4,5 @@ __pycache__/
 # user-/machine-specific runtime config (not shipped)
 preview_config.json
 user_categories.json
+presets.json
+notes.json
