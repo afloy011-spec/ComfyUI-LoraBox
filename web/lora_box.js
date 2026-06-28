@@ -456,17 +456,27 @@ function injectStyle() {
   color:#666; background:var(--comfy-menu-bg,#1c1c1c);
   border-bottom:1px solid var(--border-color,#262626); pointer-events:none; line-height:1.2;}
 .lb-pop-item{display:flex; align-items:center; gap:8px; width:100%; margin:0; padding:0 9px;
-  border-radius:5px; cursor:pointer; font-size:11.5px; line-height:1.2; min-height:25px; box-sizing:border-box;
-  color:var(--input-text,#d6d6d6); background:transparent; border:none; text-align:left; font-family:inherit;}
+  border-radius:6px; cursor:pointer; font-size:11.5px; line-height:1.2; min-height:28px; box-sizing:border-box;
+  color:var(--input-text,#d6d6d6); background:transparent; border:none; text-align:left; font-family:inherit;
+  transition:background .1s;}
 .lb-pop-item .chk{width:14px; height:14px; flex:0 0 auto; color:var(--lb-accent,#3b82f6); visibility:hidden; display:flex;}
 .lb-pop-item.sel .chk{visibility:visible;}
 .lb-pop-item .lbl{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-/* current value: muted accent fill + a thin accent edge + the check */
-.lb-pop-item.sel{background:var(--lb-accent-soft,#1d3a5f); color:#fff; box-shadow:inset 2px 0 0 var(--lb-accent,#3b82f6);}
-/* hover is a quiet lift; the bright accent is only for the keyboard-active row */
-.lb-pop-item:not(.sel):hover{background:#2a2a2d; color:#f2f2f2;}
+/* current value: just a check + a thin accent left-edge + a brighter label — NO
+   heavy fill, so the saved value never competes with the keyboard-active row. */
+.lb-pop-item.sel{box-shadow:inset 2px 0 0 var(--lb-accent,#3b82f6); color:#fff;}
+.lb-pop-item.sel .lbl{font-weight:600;}
+/* hover = quiet lift */
+.lb-pop-item:hover{background:#2a2a2d; color:#f2f2f2;}
+/* the ONE strong highlight: the keyboard-active row (wins over hover) */
 .lb-pop-item.hi{background:var(--lb-accent-soft,#1d3a5f); color:#fff;}
 .lb-pop-item.hi .chk{color:#fff;}
+/* slim, calm scrollbar instead of the chunky default */
+.lb-pop-list{scrollbar-width:thin; scrollbar-color:#3a3a3a transparent;}
+.lb-pop-list::-webkit-scrollbar{width:8px;}
+.lb-pop-list::-webkit-scrollbar-thumb{background:#3a3a3a; border-radius:4px;}
+.lb-pop-list::-webkit-scrollbar-thumb:hover{background:#4a4a4a;}
+.lb-pop-list::-webkit-scrollbar-track{background:transparent;}
 .lb-pop-empty{padding:8px; color:#888; font-size:11px; font-style:italic;}
 /* model-aware picker: compatibility toggle bar + dimmed incompatible items */
 .lb-pop-bar{display:flex; align-items:center; gap:7px; flex:0 0 auto; padding:4px 9px 6px; cursor:pointer;
@@ -897,8 +907,12 @@ async function openPicker(node, row, fieldEl) {
                 listEl.appendChild(it);
             }
         }
-        const first = listEl.querySelector(".lb-pop-item");
-        if (first) first.classList.add("hi");
+        // Start the keyboard highlight on the CURRENT selection (not blindly the
+        // first row) so the picker opens with a single highlight, scrolled to it.
+        const its = [...listEl.querySelectorAll(".lb-pop-item")];
+        const selIdx = its.findIndex((x) => x.classList.contains("sel"));
+        hi = selIdx >= 0 ? selIdx : 0;
+        if (its[hi]) { its[hi].classList.add("hi"); its[hi].scrollIntoView({ block: "nearest" }); }
     };
     const pick = (n) => {
         row.name = n;
