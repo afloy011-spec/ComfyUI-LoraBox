@@ -899,24 +899,17 @@ function detectModelArch(node) {
 }
 
 async function openPicker(node, row, fieldEl) {
+    // Toggle: clicking the field that owns the open popup closes it.
     if (CUR_POP && CUR_POP._anchor === fieldEl) { closePop(); return; }
     closePop();
-    await Promise.all([getLoraList(), getLoraCategories()]);
-    const rect = fieldEl.getBoundingClientRect();
+
+    // Build + register the popup SYNCHRONOUSLY, before the async lora-list load.
+    // Previously CUR_POP was only set AFTER the await, so a second click during
+    // loading raced in and created a second popup, orphaning the first (it then
+    // never closed). Now CUR_POP is the single source of truth from this point.
     const pop = document.createElement("div");
     pop.className = "lb-pop";
     pop._anchor = fieldEl;
-    // span from the field's left to the card's right edge so the popup covers the
-    // card's trailing +/×/value controls instead of leaving them peeking beside it
-    const card = fieldEl.closest(".lb-card");
-    const rightEdge = card ? card.getBoundingClientRect().right : rect.right;
-    let width = Math.max(rightEdge - rect.left, 220);
-    if (rect.left + width > window.innerWidth - 8) width = window.innerWidth - 8 - rect.left;
-    pop.style.left = rect.left + "px";
-    pop.style.width = width + "px";
-    const below = window.innerHeight - rect.bottom;
-    if (below < 220) pop.style.bottom = (window.innerHeight - rect.top + 4) + "px";
-    else pop.style.top = (rect.bottom + 4) + "px";
 
     const searchWrap = document.createElement("div");
     searchWrap.className = "lb-pop-search-wrap";
@@ -928,13 +921,41 @@ async function openPicker(node, row, fieldEl) {
     searchWrap.append(searchIc, search);
     const listEl = document.createElement("div");
     listEl.className = "lb-pop-list";
+    listEl.innerHTML = '<div class="lb-pop-empty">loading…</div>';
     const foot = document.createElement("div");
     foot.className = "lb-pop-hint";
     foot.textContent = "Right-click a LoRA to set its group";
     pop.append(searchWrap, listEl, foot);
+
+    // position: span from the field's left to the card's right edge so the popup
+    // covers the row's trailing controls instead of leaving them peeking beside it
+    const rect = fieldEl.getBoundingClientRect();
+    const card = fieldEl.closest(".lb-card");
+    const rightEdge = card ? card.getBoundingClientRect().right : rect.right;
+    let width = Math.max(rightEdge - rect.left, 220);
+    if (rect.left + width > window.innerWidth - 8) width = window.innerWidth - 8 - rect.left;
+    pop.style.left = rect.left + "px";
+    pop.style.width = width + "px";
+    const below = window.innerHeight - rect.bottom;
+    if (below < 220) pop.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+    else pop.style.top = (rect.bottom + 4) + "px";
+
     document.body.appendChild(pop);
     CUR_POP = pop;
     fieldEl.classList.add("open");
+    stop(search); stop(pop);
+    listEl.addEventListener("wheel", (e) => e.stopPropagation(), { passive: true });
+    // register outside-click / wheel-to-close immediately so it works during load
+    setTimeout(() => {
+        if (CUR_POP !== pop) return;
+        search.focus();
+        document.addEventListener("pointerdown", onDocDown, true);
+        window.addEventListener("wheel", onWinWheel, true);
+    }, 0);
+
+    // load the lora list/categories; bail if the popup was closed or superseded
+    await Promise.all([getLoraList(), getLoraCategories()]);
+    if (CUR_POP !== pop) return;
 
     const all = LORA_LIST || [];
 
@@ -988,13 +1009,14 @@ async function openPicker(node, row, fieldEl) {
             }
             for (const n of grp.items) {
                 const incompat = modelArch && grp.label && grp.label !== modelArch && n !== "None";
-                const it = document.createElement("button");
-                it.type = "button";
+                // a DIV (not a <button>): buttons don't always honour display:flex,
+                // which let the check reflow onto its own line under the name.
+                const it = document.createElement("div");
                 it.className = "lb-pop-item" + (n === row.name ? " sel" : "") + (incompat ? " dim" : "");
                 it.dataset.value = n;
-                const chk = document.createElement("span"); chk.className = "chk"; chk.innerHTML = CHECK_SVG;
                 const lbl = document.createElement("span"); lbl.className = "lbl";
                 lbl.textContent = n === "None" ? "— None —" : n;
+                const chk = document.createElement("span"); chk.className = "chk"; chk.innerHTML = CHECK_SVG;
                 it.title = incompat ? n + "  (different architecture than your model)" : n;
                 it.append(lbl, chk);   // name fills the row; check trails on the right
                 it.onmousedown = (e) => { e.preventDefault(); pick(n); };
@@ -1030,16 +1052,7 @@ async function openPicker(node, row, fieldEl) {
         else if (e.key === "ArrowUp") { e.preventDefault(); hi = Math.max(hi - 1, 0); setHi(items); }
         else if (e.key === "Enter") { e.preventDefault(); if (items[hi]) pick(items[hi].dataset.value); }
     };
-    stop(search);
-    stop(pop);
-    // Let the list scroll; only stop wheel from reaching the canvas.
-    listEl.addEventListener("wheel", (e) => e.stopPropagation(), { passive: true });
     draw("");
-    setTimeout(() => {
-        search.focus();
-        document.addEventListener("pointerdown", onDocDown, true);
-        window.addEventListener("wheel", onWinWheel, true);
-    }, 0);
 }
 
 app.registerExtension({
