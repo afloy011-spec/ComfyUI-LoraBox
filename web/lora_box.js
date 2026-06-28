@@ -558,19 +558,14 @@ function injectStyle() {
   color:var(--input-text,#d6d6d6); background:transparent; border:none; text-align:left; font-family:inherit;
   transition:background .1s;}
 .lb-pop-item .lbl{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-/* the check marks the current value — kept on the RIGHT (it never reflows the
-   name; all names align flush-left) and only rendered on the selected row. */
-.lb-pop-item .chk{width:15px; height:15px; flex:0 0 auto; color:var(--lb-accent,#3b82f6); display:none;}
-.lb-pop-item.sel .chk{display:flex;}
-/* current value: a check on the right + a thin accent left-edge + a brighter
-   label — NO heavy fill, so it never competes with the keyboard-active row. */
+/* current value: a thin accent left-edge + a brighter, bolder label — no check
+   and no heavy fill, so it never competes with the keyboard-active row. */
 .lb-pop-item.sel{box-shadow:inset 2px 0 0 var(--lb-accent,#3b82f6); color:#fff;}
 .lb-pop-item.sel .lbl{font-weight:600;}
 /* hover = quiet lift */
 .lb-pop-item:hover{background:#2a2a2d; color:#f2f2f2;}
 /* the ONE strong highlight: the keyboard-active row (wins over hover) */
 .lb-pop-item.hi{background:var(--lb-accent-soft,#1d3a5f); color:#fff;}
-.lb-pop-item.hi .chk{color:#fff;}
 /* slim, calm scrollbar instead of the chunky default */
 .lb-pop-list{scrollbar-width:thin; scrollbar-color:#3a3a3a transparent;}
 .lb-pop-list::-webkit-scrollbar{width:8px;}
@@ -1016,9 +1011,8 @@ async function openPicker(node, row, fieldEl) {
                 it.dataset.value = n;
                 const lbl = document.createElement("span"); lbl.className = "lbl";
                 lbl.textContent = n === "None" ? "— None —" : n;
-                const chk = document.createElement("span"); chk.className = "chk"; chk.innerHTML = CHECK_SVG;
                 it.title = incompat ? n + "  (different architecture than your model)" : n;
-                it.append(lbl, chk);   // name fills the row; check trails on the right
+                it.append(lbl);   // selection shown by the accent fill + left edge + bold
                 it.onmousedown = (e) => { e.preventDefault(); pick(n); };
                 if (n !== "None") {
                     it.oncontextmenu = (e) => {
