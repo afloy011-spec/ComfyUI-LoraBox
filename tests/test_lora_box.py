@@ -252,6 +252,29 @@ class LoraBoxTest(unittest.TestCase):
         m, c, merged = self.node.apply([], [], prompt=None, data=data)
         self.assertEqual(merged, "kept verbatim")
 
+    def test_triggers_off_passthrough_but_lora_applied(self):
+        # pos == "off": trigger words are NOT merged, prompt passes through
+        # untouched — but the LoRA is still applied.
+        data = json.dumps({"v": 1, "pos": "off", "prompt": "a red car",
+                           "rows": [{"on": True, "name": "a.safetensors", "sm": 1.0}]})
+        m, c, merged = self.node.apply([], [], prompt=None, data=data)
+        self.assertEqual(merged, "a red car")            # no "alpha, beta" appended
+        self.assertEqual(_APPLIED, [("a.safetensors", 1.0, 1.0)])
+
+    def test_prompt_hidden_ignores_panel_value(self):
+        # promptShow False: the in-node panel prompt is ignored (only a connected
+        # prompt would be used) — here none, so output is just the triggers.
+        data = json.dumps({"v": 1, "pos": "end", "promptShow": False, "prompt": "hidden text",
+                           "rows": [{"on": True, "name": "a.safetensors", "sm": 1.0}]})
+        m, c, merged = self.node.apply([], [], prompt=None, data=data)
+        self.assertEqual(merged, "alpha, beta")
+
+    def test_prompt_hidden_connected_still_used(self):
+        data = json.dumps({"v": 1, "pos": "end", "promptShow": False, "prompt": "hidden text",
+                           "rows": [{"on": True, "name": "a.safetensors", "sm": 1.0}]})
+        m, c, merged = self.node.apply([], [], prompt="connected", data=data)
+        self.assertEqual(merged, "connected, alpha, beta")
+
     def test_metadata_cache_hit(self):
         lora_box.trigger_words_for("a.safetensors")
         self.assertIn(self.a, lora_box._META_CACHE)

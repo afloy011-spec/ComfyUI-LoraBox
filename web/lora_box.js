@@ -1062,6 +1062,7 @@ app.registerExtension({
             node._lbPos = "beginning";
             node._lbDelim = ", ";
             node._lbPrompt = "";
+            node._lbPromptShow = true;
             node._lbPresetName = null;
             node._lbOptsOpen = false;
             node._lbContentH = 150;
@@ -1146,6 +1147,9 @@ app.registerExtension({
             const sepSw = mkSwitch(false, "Separate model and clip strengths per LoRA",
                 (v) => { node._lbSep = v; renderRows(node); sizeNode(node); serialize(node); });
             node._lbSepCb = sepSw._cb;
+            const promptSw = mkSwitch(true, "Show the in-node Prompt editor (a connected prompt input always takes precedence)",
+                (v) => { node._lbPromptShow = v; applyPromptShow(node); sizeNode(node); serialize(node); });
+            node._lbPromptCb = promptSw._cb;
 
             // ---- presets: one field that opens a styled load/save/delete menu ----
             const presetSec = document.createElement("div");
@@ -1170,7 +1174,7 @@ app.registerExtension({
             sec.className = "lb-sec"; sec.textContent = "Triggers";
 
             const sel = document.createElement("select");
-            [["beginning", "Start"], ["end", "End"]].forEach(([v, t]) => {
+            [["beginning", "Start"], ["end", "End"], ["off", "Off"]].forEach(([v, t]) => {
                 const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o);
             });
             sel.value = node._lbPos || "beginning";
@@ -1187,13 +1191,14 @@ app.registerExtension({
 
             const hint = document.createElement("div");
             hint.className = "lb-hint";
-            hint.innerHTML = "Trigger words are the keywords a LoRA was trained on. If you wire a " +
-                "prompt in, they're added at the <b>start</b> (stronger emphasis) or the " +
-                "<b>end</b> (a softer modifier). “Sep” is what goes between them.";
+            hint.innerHTML = "Trigger words are the keywords a LoRA was trained on. They're added to " +
+                "the prompt at the <b>start</b> (stronger emphasis) or the <b>end</b> (a softer " +
+                "modifier) — or <b>off</b> to leave your prompt untouched. “Sep” is what goes between them.";
 
             opts.append(
                 mkOrow("Mute all", muteSw, "Skip every LoRA and pass the prompt through untouched"),
                 mkOrow("Model + Clip", sepSw, "Separate model and clip strengths per LoRA"),
+                mkOrow("Prompt field", promptSw, "Show the in-node Prompt editor (a connected prompt input always wins)"),
                 presetSec, presetRow,
                 sec,
                 mkOrow("Trigger position", sel, "Where LoRA trigger words merge into a connected prompt"),
@@ -1311,6 +1316,10 @@ function applyMute(node) {
     els.forEach((el, i) => { const row = node._lbRows[i]; if (row) el.classList.toggle("lb-off", rowOff(node, row)); });
 }
 
+function applyPromptShow(node) {
+    if (node._lbPromptWrap) node._lbPromptWrap.style.display = node._lbPromptShow === false ? "none" : "";
+}
+
 function markDuplicates(node) {
     const cards = node._lbList ? [...node._lbList.querySelectorAll(".lb-card")] : [];
     const counts = {};
@@ -1414,12 +1423,13 @@ function initFromData(node) {
     node._lbDataW = dataW;
     let parsed = [];
     try { parsed = JSON.parse(dataW?.value || "[]"); } catch (e) { parsed = []; }
-    let rows = parsed, mute = false, pos = "beginning", delim = ", ", promptText = "";
+    let rows = parsed, mute = false, pos = "beginning", delim = ", ", promptText = "", promptShow = true;
     if (parsed && !Array.isArray(parsed) && typeof parsed === "object") {
         mute = !!parsed.mute;
         if (typeof parsed.pos === "string") pos = parsed.pos;
         if (typeof parsed.delim === "string") delim = parsed.delim;
         if (typeof parsed.prompt === "string") promptText = parsed.prompt;
+        if (typeof parsed.promptShow === "boolean") promptShow = parsed.promptShow;
         rows = Array.isArray(parsed.rows) ? parsed.rows : [];
     }
     if (!Array.isArray(rows)) rows = [];
@@ -1437,10 +1447,13 @@ function initFromData(node) {
     node._lbPos = pos;
     node._lbDelim = delim;
     node._lbPrompt = promptText;
+    node._lbPromptShow = promptShow;
     if (node._lbPromptIn) {
         node._lbPromptIn.value = promptText;
         if (node._lbGrowPrompt) requestAnimationFrame(node._lbGrowPrompt);
     }
+    if (node._lbPromptCb) node._lbPromptCb.checked = promptShow;
+    applyPromptShow(node);
     if (node._lbSepCb) node._lbSepCb.checked = node._lbSep;
     // Restore the saved "mute all" state so a muted-saved workflow reopens muted
     // AND shows the toggle on (was reset to false → LoRAs silently un-applied).
@@ -1577,6 +1590,7 @@ function serialize(node) {
         pos: node._lbPos || "beginning",
         delim: node._lbDelim != null ? node._lbDelim : ", ",
         prompt: node._lbPrompt || "",
+        promptShow: node._lbPromptShow !== false,
         rows,
     });
 }
@@ -1947,7 +1961,7 @@ function sizeNode(node) {
     // The in-node prompt field (label + auto-growing textarea) is measured the
     // same way; fall back to a constant until the DOM has laid it out.
     let promptH = 0;
-    if (node._lbPromptWrap) {
+    if (node._lbPromptWrap && node._lbPromptShow !== false) {
         const measured = node._lbPromptWrap.offsetHeight;
         promptH = (measured > 0 ? measured : PROMPT_FALLBACK) + GAP;
     }

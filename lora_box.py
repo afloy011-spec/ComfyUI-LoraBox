@@ -939,12 +939,19 @@ class LoraBox:
         else:
             rows = []
 
+        # Trigger-word auto-merge can be turned off entirely (pos == "off"): the
+        # prompt then passes through untouched (the LoRAs still load).
+        triggers_off = str(pos).lower() == "off"
+
         # The positive prompt can arrive on the connected `prompt` input OR be
         # typed into the node's own panel (stored in data as "prompt"). The
         # connected input wins when it carries text; otherwise we fall back to the
         # panel value — so the node still works when the UI's graph→prompt
-        # conversion drops a primitive feeding the prompt socket.
-        panel_prompt = obj.get("prompt") if isinstance(obj, dict) else None
+        # conversion drops a primitive feeding the prompt socket. When the user
+        # hides the in-node Prompt editor (promptShow == False) the panel value is
+        # not used — only a connected prompt is.
+        prompt_show = obj.get("promptShow", True) if isinstance(obj, dict) else True
+        panel_prompt = obj.get("prompt") if (isinstance(obj, dict) and prompt_show) else None
         eff_prompt = prompt if (isinstance(prompt, str) and prompt.strip()) else (panel_prompt or "")
 
         if muted:
@@ -983,11 +990,12 @@ class LoraBox:
             model, clip = comfy.sd.load_lora_for_models(model, clip, lora, sm, sc)
             applied.append(f"{name} (m={sm}, c={sc})")
             # manual trigger override (row.trig) wins over auto-detection
-            tw = row.get("trig")
-            if isinstance(tw, str):
-                triggers.extend([w.strip() for w in tw.split(",") if w.strip()])
-            else:
-                triggers.extend(trigger_words_for(name))
+            if not triggers_off:
+                tw = row.get("trig")
+                if isinstance(tw, str):
+                    triggers.extend([w.strip() for w in tw.split(",") if w.strip()])
+                else:
+                    triggers.extend(trigger_words_for(name))
 
         if applied:
             log.info("applied: %s", "; ".join(applied))
@@ -998,7 +1006,7 @@ class LoraBox:
                 seen.add(w.lower())
                 words.append(w)
         tw = ", ".join(words)
-        merged = merge_prompt(eff_prompt, tw, pos, delim)
+        merged = eff_prompt if triggers_off else merge_prompt(eff_prompt, tw, pos, delim)
         return (model, clip, merged)
 
 

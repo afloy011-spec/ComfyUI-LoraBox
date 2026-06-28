@@ -56,14 +56,18 @@ offering a one-row-per-LoRA design.
 You can also type the positive prompt **directly in the node** (a Prompt box in
 the panel); it's stored in `data`, so it serializes reliably and needs no
 external prompt node. A connected `prompt` input takes precedence when it carries
-text; otherwise the in-node Prompt box is used.
+text; otherwise the in-node Prompt box is used. Prefer your own prompt node? Turn
+the box off with **Prompt field** in the ⚙ disclosure — then only a connected
+`prompt` is used.
 
 Outputs: `MODEL`, `CLIP`, `prompt` (STRING — the prompt with trigger words
 merged in).
 
-The ⚙ options disclosure has a **Trigger position** dropdown (`Start` / `End`)
-and a **Sep** field (delimiter); both are stored in `data` and drive the merged
-`prompt` output. So one node loads the LoRA *and* injects its trigger word into
+The ⚙ options disclosure has a **Trigger position** dropdown (`Start` / `End` /
+`Off`) and a **Sep** field (delimiter); both are stored in `data` and drive the
+merged `prompt` output. Set it to **Off** to disable trigger-word injection
+entirely — the prompt then passes through untouched (the LoRAs still load). So
+one node loads the LoRA *and* injects its trigger word into
 the prompt automatically — no separate merge node needed. (If `prompt` is not
 connected, `prompt` output is just the trigger words; mute passes the prompt
 through untouched.)
