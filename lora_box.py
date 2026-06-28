@@ -521,9 +521,13 @@ try:
                 None, _fetch_civitai_triggers, file)
         return web.json_response({"file": file, "words": words})
 
-    @PromptServer.instance.routes.get("/lorabox/categories")
-    async def _lorabox_categories(request):
-        """Map every registered lora to a picker group (name + metadata)."""
+    def _all_categories():
+        """Map every registered lora to a picker group (name + metadata).
+
+        Blocking: filename-unmatched loras have their safetensors header read
+        from disk, so on a large collection (cold cache) this is real I/O — run
+        it off the event loop so the first picker open doesn't stall the UI.
+        """
         cats = {}
         try:
             names = folder_paths.get_filename_list("loras")
@@ -532,6 +536,11 @@ try:
         for name in names:
             if name and name != "None":
                 cats[name] = category_for(name)
+        return cats
+
+    @PromptServer.instance.routes.get("/lorabox/categories")
+    async def _lorabox_categories(request):
+        cats = await asyncio.get_event_loop().run_in_executor(None, _all_categories)
         return web.json_response({"categories": cats})
 
     @PromptServer.instance.routes.get("/lorabox/usercats")

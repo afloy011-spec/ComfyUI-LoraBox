@@ -1291,7 +1291,7 @@ function serialize(node) {
     });
     node._lbDataW.value = JSON.stringify({
         v: 1, mute: !!node._lbMute,
-        pos: node._lbPos || "end",
+        pos: node._lbPos || "beginning",
         delim: node._lbDelim != null ? node._lbDelim : ", ",
         prompt: node._lbPrompt || "",
         rows,

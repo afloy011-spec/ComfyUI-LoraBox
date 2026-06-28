@@ -14,21 +14,22 @@ offering a one-row-per-LoRA design.
   strengths, **trigger merge position** + delimiter) live behind a ⚙ disclosure.
 - A live **active count** in the header; **mute all** survives a workflow save
   without wiping per-row on/off state.
-- Drag-to-reorder by grabbing the coloured left bar of a card (it doubles as
-  the active/disabled indicator); duplicate LoRAs get an explicit "duplicate" badge.
+- Drag-to-reorder by grabbing a card's **thumbnail**; duplicate LoRAs get an
+  explicit "duplicate" badge.
 - **Reversible delete**: removing a row shows an *Undo* toast.
 - Per-row trigger words: auto-detected from real safetensors trigger fields
   (not noisy training tags), fully editable, resettable to auto. Merged straight
   into the `prompt` output.
 - **Per-LoRA preview pictures**: each row shows a thumbnail so LoRAs are easy to
   tell apart. The LoRA's own preview (`<lora>.preview.png`, as dropped by
-  Civitai / model managers) loads **automatically**; otherwise an empty
-  thumbnail offers **✨ Generate** (a quick test render — pick *Character* or
-  *Style* so style LoRAs get a scene, not a portrait) or **＋ Add** (your own
-  image, click or drag & drop). Generate **matches the LoRA's architecture**
-  (Z-Image / Flux / SDXL / SD1.5). Hover an image for the enlarge + regenerate /
-  replace / remove chips. A custom image is stored as a sidecar next to the
-  `.safetensors`, so it *belongs to the LoRA* and shows in every Lora Box.
+  Civitai / model managers) loads **automatically**. **Click the thumbnail** for
+  a menu: *Generate — Character* / *Generate — Style* (a quick test render; the
+  *Style* option gives style LoRAs a scene instead of a portrait), *Upload an
+  image…*, and *Remove picture*. Generate **matches the LoRA's architecture**
+  (Z-Image / Flux / SDXL / SD1.5). You can also **drag & drop** an image straight
+  onto the thumbnail, and **hover** a picture to enlarge it. A custom image is
+  stored as a sidecar next to the `.safetensors`, so it *belongs to the LoRA* and
+  shows in every Lora Box.
 - **Architecture-grouped picker**: loras are grouped (Z-Image, Flux, Krea, SDXL,
   SD1.5, …); **right-click** one to assign a custom group — it sticks across
   every Lora Box.
@@ -52,8 +53,8 @@ text; otherwise the in-node Prompt box is used.
 Outputs: `MODEL`, `CLIP`, `prompt` (STRING — the prompt with trigger words
 merged in).
 
-The panel header has a **triggers** dropdown (`at end` / `at start of prompt`)
-and a **sep** field (delimiter); both are stored in `data` and drive the merged
+The ⚙ options disclosure has a **Trigger position** dropdown (`Start` / `End`)
+and a **Sep** field (delimiter); both are stored in `data` and drive the merged
 `prompt` output. So one node loads the LoRA *and* injects its trigger word into
 the prompt automatically — no separate merge node needed. (If `prompt` is not
 connected, `prompt` output is just the trigger words; mute passes the prompt
@@ -87,10 +88,16 @@ Clone into `ComfyUI/custom_nodes/` and restart ComfyUI:
 ComfyUI/custom_nodes/ComfyUI-LoraBox/
 ├── __init__.py
 ├── lora_box.py
+├── preview_generate.py
 ├── pyproject.toml
+├── LICENSE
+├── README.md
 └── web/
     └── lora_box.js
 ```
+
+Or install from the **ComfyUI Registry** / **ComfyUI-Manager** (search "Afloy
+Lora Box").
 
 ## Configuration
 
