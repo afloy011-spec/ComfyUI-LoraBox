@@ -672,11 +672,28 @@ let MENU = null;
 // Close on pointerdown, NOT mousedown: litegraph preventDefaults the canvas
 // pointerdown, which suppresses the compatibility mousedown — so a click on the
 // empty graph never fired the old mousedown handler and the menu stayed open.
-function onMenuDocDown(e) { if (MENU && !MENU.contains(e.target)) closeMenu(); }
+// A click on the menu's own anchor is ignored here so the anchor's handler can
+// TOGGLE the menu (close it) instead of this closing it and the click reopening.
+function onMenuDocDown(e) {
+    if (!MENU) return;
+    if (MENU.contains(e.target)) return;
+    const a = MENU._anchor;
+    if (a && (e.target === a || a.contains(e.target))) return;
+    closeMenu();
+}
+// Any scroll/zoom outside the menu also dismisses it (normal dropdown behaviour).
+function onMenuWheel(e) { if (MENU && !MENU.contains(e.target)) closeMenu(); }
 function closeMenu() {
     if (!MENU) return;
     document.removeEventListener("pointerdown", onMenuDocDown, true);
+    window.removeEventListener("wheel", onMenuWheel, true);
     MENU.remove(); MENU = null;
+}
+function armMenuClose() {
+    setTimeout(() => {
+        document.addEventListener("pointerdown", onMenuDocDown, true);
+        window.addEventListener("wheel", onMenuWheel, true);
+    }, 0);
 }
 // items: [{head}] section label, or {label, desc?, onPick} action
 function openMenu(anchor, items) {
@@ -707,8 +724,9 @@ function openMenu(anchor, items) {
     if (top + mh > window.innerHeight - 8) top = r.top - mh - 4;
     m.style.left = Math.max(8, left) + "px";
     m.style.top = Math.max(8, top) + "px";
+    m._anchor = anchor;
     MENU = m;
-    setTimeout(() => document.addEventListener("pointerdown", onMenuDocDown, true), 0);
+    armMenuClose();
 }
 
 /* Custom picker groups currently in use (any category that isn't a built-in). */
@@ -1173,7 +1191,12 @@ app.registerExtension({
             const pfCar = document.createElement("span"); pfCar.className = "car"; pfCar.textContent = "▼";
             presetField.append(pfTxt, pfCar);
             node._lbPresetFieldTxt = pfTxt;
-            presetField.onclick = (e) => { e.stopPropagation(); openPresetMenu(node, presetField); };
+            presetField.onclick = (e) => {
+                e.stopPropagation();
+                // toggle: if this field's menu is already open, close it
+                if (MENU && MENU._anchor === presetField) { closeMenu(); return; }
+                openPresetMenu(node, presetField);
+            };
             presetField.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPresetMenu(node, presetField); } };
             stop(presetField);
             presetRow.append(presetField);
@@ -1583,8 +1606,9 @@ function openPresetMenu(node, anchor) {
     if (top + m.offsetHeight > window.innerHeight - 8) top = r.top - m.offsetHeight - 4;
     m.style.left = Math.max(8, left) + "px";
     m.style.top = Math.max(8, top) + "px";
+    m._anchor = anchor;
     MENU = m;
-    setTimeout(() => document.addEventListener("pointerdown", onMenuDocDown, true), 0);
+    armMenuClose();
 }
 
 function serialize(node) {
