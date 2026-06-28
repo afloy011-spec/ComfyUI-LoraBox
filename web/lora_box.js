@@ -445,8 +445,14 @@ function injectStyle() {
 .lb-pop-search-wrap:focus-within{border-color:var(--lb-accent,#3b82f6);}
 .lb-pop-search-wrap .ic{flex:0 0 auto; width:16px; height:16px; color:#888; pointer-events:none; display:flex;}
 .lb-pop-search-wrap .ic svg{display:block;}
-.lb-pop-search{flex:1 1 auto; min-width:0; height:100%; padding:0; font-size:11.5px; outline:none;
-  background:transparent; color:var(--input-text,#eee); border:none; box-sizing:border-box;}
+/* the input must be fully transparent — the wrap owns the border/focus ring.
+   Force it (!important + :focus reset) because the ComfyUI theme otherwise gives
+   a focused <input> its own border / box-shadow, which showed as a doubled
+   "box-in-box" frame stuck inside the search wrap. */
+.lb-pop-search,.lb-pop-search:focus,.lb-pop-search:focus-visible{flex:1 1 auto; min-width:0; height:100%;
+  margin:0; padding:0; font-size:11.5px; box-sizing:border-box; color:var(--input-text,#eee);
+  background:transparent !important; border:none !important; border-radius:0 !important;
+  outline:none !important; box-shadow:none !important;}
 .lb-pop-list{flex:1 1 auto; min-height:0; overflow-x:hidden; overflow-y:auto;
   overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
 .lb-pop-none{padding:5px 9px; font-size:11.5px; font-style:italic; color:#888; cursor:pointer; border-radius:5px;}
