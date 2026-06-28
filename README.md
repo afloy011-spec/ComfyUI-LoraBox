@@ -92,6 +92,25 @@ the fragile `JoinStrings` + `JoinStrings` + `LazySwitchKJ` combo.
 Output: `prompt` (STRING). Empty sides are handled without stray delimiters, and
 trigger words already present in the prompt are not duplicated.
 
+## Example workflow
+
+[`examples/Afloy-LoraBox-Z-Image.json`](examples/Afloy-LoraBox-Z-Image.json) — a
+clean, minimal **Z-Image Turbo** graph built around Lora Box, using only core
+ComfyUI nodes plus this one (no third-party dependencies):
+
+```
+UNETLoader ┐
+CLIPLoader ┼─► ModelSamplingAuraFlow ─► Lora Box ─► CLIP Text Encode (+) ─► KSampler ─► VAE Decode ─► Save Image
+VAELoader ─┘                              │  └────────► CLIP Text Encode (−) ─┘            ▲
+                                          └─ MODEL / CLIP ───────────────────────────────┘
+```
+
+Lora Box's `prompt` output (your prompt + the LoRA's trigger words) feeds the
+positive **CLIP Text Encode**, and its `MODEL`/`CLIP` feed the sampler/encoders.
+Type your prompt in the node, pick a LoRA, **Queue**. Needs the Z-Image Turbo
+models (`z_image_turbo_bf16`, `qwen_3_4b`, `ae`); swap them for your own in the
+loaders if different.
+
 ## Install
 
 Clone into `ComfyUI/custom_nodes/` and restart ComfyUI:
