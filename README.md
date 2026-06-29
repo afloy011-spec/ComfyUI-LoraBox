@@ -127,12 +127,14 @@ the loaders for an SDXL/Flux/etc. base and it works the same.
 
 [`examples/Afloy-LoraBox-Z-Image-Advanced.json`](examples/Afloy-LoraBox-Z-Image-Advanced.json)
 adds a **hi-res fix** (latent upscale + a second sampler) and a **FaceDetailer**
-pass, then previews the result — ideal for character LoRAs (crisp faces even in
-full-body shots). Tunables are explained in its on-canvas note (upscale amount,
-hi-res denoise, face-detail strength). **Extra requirement:**
-[ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack) (for
-`FaceDetailer` + `UltralyticsDetectorProvider`) and the `face_yolov8m` bbox
-model. Want zero dependencies? Use the basic example above instead.
+pass, then shows a **before/after slider** and a **face-detection preview** (so
+you can see exactly where the face was refined) — ideal for character LoRAs
+(crisp faces even in full-body shots). Tunables are explained in its on-canvas
+note (upscale amount, hi-res denoise, face-detail strength). **Extra
+requirements:** [ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack)
+(`FaceDetailer` + `UltralyticsDetectorProvider` + the `face_yolov8m` bbox model)
+and [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) (the before/after
+*Image Comparer*). Want zero dependencies? Use the basic example above instead.
 
 ## Install
 

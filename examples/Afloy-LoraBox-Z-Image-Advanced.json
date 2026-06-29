@@ -1,6 +1,6 @@
 {
-  "last_node_id": 31,
-  "last_link_id": 25,
+  "last_node_id": 42,
+  "last_link_id": 29,
   "nodes": [
     {
       "id": 1,
@@ -688,7 +688,8 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            18
+            18,
+            26
           ]
         }
       ],
@@ -752,7 +753,7 @@
         "text": ""
       },
       "widgets_values": [
-        "AFLOY LORA BOX - ADVANCED (Z-Image Turbo)\n=========================================\nPipeline: base -> hires upscale (1.5x + 2nd KSampler denoise 0.4) -> FaceDetailer\n-> PreviewImage. Great for character LoRAs (sharp faces in full-body shots).\n\n1) Models: z_image_turbo_bf16, qwen_3_4b (lumina2), ae.safetensors.\n2) In Lora Box: pick your LoRA(s) (rows start empty), type your prompt -> Queue.\n3) Tweak: LatentUpscaleBy 'scale_by' = upscale amount; 2nd KSampler 'denoise'\n   (~0.35-0.45) = how much the upscale re-renders; FaceDetailer 'denoise'\n   (~0.4) = face refine strength; 'bbox_threshold' = detection sensitivity.\n\nREQUIRES (besides core + Lora Box): ComfyUI-Impact-Pack (FaceDetailer +\nUltralyticsDetectorProvider) and the face_yolov8m bbox model. For a zero-\ndependency version use Afloy-LoraBox-Z-Image.json instead."
+        "AFLOY LORA BOX - ADVANCED (Z-Image Turbo)\n=========================================\nPipeline: base -> hires upscale (1.5x + 2nd KSampler denoise 0.4) -> FaceDetailer\n-> PreviewImage. Great for character LoRAs (sharp faces in full-body shots).\n\n1) Models: z_image_turbo_bf16, qwen_3_4b (lumina2), ae.safetensors.\n2) In Lora Box: pick your LoRA(s) (rows start empty), type your prompt -> Queue.\n3) Tweak: LatentUpscaleBy 'scale_by' = upscale amount; 2nd KSampler 'denoise'\n   (~0.35-0.45) = how much the upscale re-renders; FaceDetailer 'denoise'\n   (~0.4) = face refine strength; 'bbox_threshold' = detection sensitivity.\n\nREQUIRES (besides core + Lora Box): ComfyUI-Impact-Pack (FaceDetailer +\nUltralyticsDetectorProvider + face_yolov8m bbox model) and rgthree-comfy\n(Image Comparer). The before/after slider + face-mask preview are optional - delete\nthem if you don't want those deps. For a zero-\ndependency version use Afloy-LoraBox-Z-Image.json instead."
       ],
       "color": "#432",
       "bgcolor": "#653",
@@ -1360,7 +1361,8 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            25
+            25,
+            27
           ]
         },
         {
@@ -1384,7 +1386,9 @@
           "localized_name": "mask",
           "name": "mask",
           "type": "MASK",
-          "links": []
+          "links": [
+            28
+          ]
         },
         {
           "label": "detailer_pipe",
@@ -1446,6 +1450,125 @@
       ],
       "color": "#323",
       "bgcolor": "#535"
+    },
+    {
+      "id": 40,
+      "type": "Image Comparer (rgthree)",
+      "pos": [
+        2640,
+        560
+      ],
+      "size": [
+        420,
+        380
+      ],
+      "flags": {
+        "pinned": true
+      },
+      "order": 32,
+      "mode": 0,
+      "inputs": [
+        {
+          "dir": 3,
+          "name": "image_a",
+          "type": "IMAGE",
+          "link": 26
+        },
+        {
+          "dir": 3,
+          "name": "image_b",
+          "type": "IMAGE",
+          "link": 27
+        }
+      ],
+      "outputs": [],
+      "title": "Before / After (drag the slider)",
+      "properties": {
+        "comparer_mode": "Slide",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        [
+          {
+            "name": "A",
+            "selected": true,
+            "url": ""
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": ""
+          }
+        ]
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 41,
+      "type": "MaskToImage",
+      "pos": [
+        2640,
+        980
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "flags": {},
+      "order": 41,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 28
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            29
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "MaskToImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 42,
+      "type": "PreviewImage",
+      "pos": [
+        2900,
+        980
+      ],
+      "size": [
+        300,
+        330
+      ],
+      "flags": {},
+      "order": 42,
+      "mode": 0,
+      "title": "Face detected here (mask)",
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 29
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
     }
   ],
   "links": [
@@ -1646,6 +1769,38 @@
       31,
       0,
       11,
+      0,
+      "IMAGE"
+    ],
+    [
+      26,
+      10,
+      0,
+      40,
+      0,
+      "IMAGE"
+    ],
+    [
+      27,
+      31,
+      0,
+      40,
+      1,
+      "IMAGE"
+    ],
+    [
+      28,
+      31,
+      3,
+      41,
+      0,
+      "MASK"
+    ],
+    [
+      29,
+      41,
+      0,
+      42,
       0,
       "IMAGE"
     ]
