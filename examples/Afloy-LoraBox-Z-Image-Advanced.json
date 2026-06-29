@@ -969,7 +969,8 @@
         "bbox/face_yolov8m.pt"
       ],
       "color": "#222",
-      "bgcolor": "#000"
+      "bgcolor": "#000",
+      "title": "Face bbox detector"
     },
     {
       "id": 31,
@@ -1401,7 +1402,7 @@
           "links": []
         }
       ],
-      "title": "HandDetailer",
+      "title": "Face Detailer",
       "properties": {
         "cnr_id": "comfyui-impact-pack",
         "ver": "f86c5afc68958afb89bf66898d6b5038ce98a096",
