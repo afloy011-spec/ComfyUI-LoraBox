@@ -96,7 +96,9 @@ trigger words already present in the prompt are not duplicated.
 
 [`examples/Afloy-LoraBox-Z-Image.json`](examples/Afloy-LoraBox-Z-Image.json) — a
 clean, minimal **Z-Image Turbo** graph built around Lora Box, using only core
-ComfyUI nodes plus this one (no third-party dependencies):
+ComfyUI nodes plus this one (**no third-party dependencies**):
+
+![example output](examples/preview.png)
 
 ```
 UNETLoader ┐
@@ -105,11 +107,21 @@ VAELoader ─┘                              │  └────────�
                                           └─ MODEL / CLIP ───────────────────────────────┘
 ```
 
-Lora Box's `prompt` output (your prompt + the LoRA's trigger words) feeds the
-positive **CLIP Text Encode**, and its `MODEL`/`CLIP` feed the sampler/encoders.
-Type your prompt in the node, pick a LoRA, **Queue**. Needs the Z-Image Turbo
-models (`z_image_turbo_bf16`, `qwen_3_4b`, `ae`); swap them for your own in the
-loaders if different.
+**Quick start** (a `READ ME` note in the canvas repeats this):
+
+1. Install the Z-Image Turbo models: `z_image_turbo_bf16` (UNet), `qwen_3_4b`
+   (CLIP, type `lumina2`), `ae.safetensors` (VAE).
+2. In the **Lora Box** node, click a row's *Choose a LoRA…* and pick your
+   LoRA(s) — stack as many as you want; **trigger words fill in automatically**.
+   (The example ships with empty rows so it loads clean — add your own.)
+3. Type your prompt in the node's **Prompt** field → **Queue**.
+
+Lora Box's `prompt` output (your prompt + the LoRA trigger words, already merged)
+feeds the positive **CLIP Text Encode**; its `MODEL`/`CLIP` feed the
+sampler/encoders — so one node loads the LoRAs *and* wires the prompt.
+
+This example is Z-Image Turbo, but the node is **architecture-agnostic** — swap
+the loaders for an SDXL/Flux/etc. base and it works the same.
 
 ## Install
 

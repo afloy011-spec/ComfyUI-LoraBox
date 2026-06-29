@@ -1,5 +1,5 @@
 {
-  "last_node_id": 11,
+  "last_node_id": 12,
   "last_link_id": 13,
   "nodes": [
     {
@@ -327,7 +327,7 @@
         }
       },
       "widgets_values": [
-        "{\"v\": 1, \"mute\": false, \"pos\": \"beginning\", \"delim\": \", \", \"promptShow\": true, \"prompt\": \"A woman reading a book by a window, soft natural daylight, cozy room, candid photo, photorealistic\", \"rows\": [{\"on\": true, \"name\": \"zimage_character_katosik_v1_step3000.safetensors\", \"sm\": 0.9, \"sc\": 0.9}]}",
+        "{\"v\": 1, \"mute\": false, \"pos\": \"beginning\", \"delim\": \", \", \"promptShow\": true, \"prompt\": \"A candid portrait of a young woman by a sunlit window, soft natural daylight, relaxed expression, fine skin detail, shallow depth of field, photorealistic\", \"rows\": [{\"on\": true, \"name\": \"None\", \"sm\": 1.0, \"sc\": 1.0}, {\"on\": true, \"name\": \"None\", \"sm\": 1.0, \"sc\": 1.0}]}",
         ""
       ],
       "color": "#232",
@@ -726,6 +726,32 @@
       "widgets_values": [
         "AfloyLoraBox"
       ]
+    },
+    {
+      "id": 12,
+      "type": "Note",
+      "pos": [
+        -560,
+        40
+      ],
+      "size": [
+        500,
+        360
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "READ ME - quick start",
+      "properties": {
+        "text": ""
+      },
+      "widgets_values": [
+        "AFLOY LORA BOX - example (Z-Image Turbo)\n=========================================\n1) Models: z_image_turbo_bf16 (UNet), qwen_3_4b (CLIP, type=lumina2),\n   ae.safetensors (VAE). From the Z-Image release.\n2) In the Lora Box node: click a row's 'Choose a LoRA...' to pick your\n   LoRA(s) - stack as many as you like, set the weight. Trigger words fill\n   in automatically. (Rows start empty - add your own.)\n3) Type your prompt in the Lora Box 'Prompt' field -> Queue.\n\nThe node outputs your prompt with the LoRA trigger words already merged,\nplus the patched MODEL/CLIP - one node loads the LoRAs AND wires the prompt.\n\nWorks with ANY architecture (SDXL/Flux/...) - this example is Z-Image Turbo;\nswap the loaders for your base. No third-party custom nodes required."
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
     }
   ],
   "links": [
