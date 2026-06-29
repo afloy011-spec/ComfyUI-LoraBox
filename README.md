@@ -123,6 +123,17 @@ sampler/encoders — so one node loads the LoRAs *and* wires the prompt.
 This example is Z-Image Turbo, but the node is **architecture-agnostic** — swap
 the loaders for an SDXL/Flux/etc. base and it works the same.
 
+### Advanced example (hi-res upscale + face detailer)
+
+[`examples/Afloy-LoraBox-Z-Image-Advanced.json`](examples/Afloy-LoraBox-Z-Image-Advanced.json)
+adds a **hi-res fix** (latent upscale + a second sampler) and a **FaceDetailer**
+pass, then previews the result — ideal for character LoRAs (crisp faces even in
+full-body shots). Tunables are explained in its on-canvas note (upscale amount,
+hi-res denoise, face-detail strength). **Extra requirement:**
+[ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack) (for
+`FaceDetailer` + `UltralyticsDetectorProvider`) and the `face_yolov8m` bbox
+model. Want zero dependencies? Use the basic example above instead.
+
 ## Install
 
 Clone into `ComfyUI/custom_nodes/` and restart ComfyUI:
