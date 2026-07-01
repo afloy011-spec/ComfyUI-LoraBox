@@ -1141,8 +1141,16 @@ app.registerExtension({
             pTa.placeholder = "positive prompt — trigger words are added automatically…";
             node._lbPromptIn = pTa;
             const growPrompt = () => {
+                // scrollHeight reflects the VALUE, not the placeholder, so an
+                // empty box sizes to a single line and clips a placeholder that
+                // wraps to two (the hint looked "eaten" on reload). Measure the
+                // placeholder as if it were the value when the box is empty.
+                const empty = pTa.value === "";
+                if (empty) pTa.value = pTa.placeholder || "";
                 pTa.style.height = "auto";
-                pTa.style.height = Math.max(PROMPT_MIN, pTa.scrollHeight) + "px";
+                const h = Math.max(PROMPT_MIN, pTa.scrollHeight);
+                if (empty) pTa.value = "";
+                pTa.style.height = h + "px";
                 sizeNode(node);
             };
             node._lbGrowPrompt = growPrompt;
