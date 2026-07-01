@@ -7,7 +7,7 @@ A compact multi-LoRA loader for [ComfyUI](https://github.com/comfyanonymous/Comf
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-compatible-8A2BE2?style=flat-square)](https://github.com/comfyanonymous/ComfyUI)
 [![Version](https://img.shields.io/badge/version-1.6.5-059669?style=flat-square)](https://github.com/afloy011-spec/ComfyUI-LoraBox/tags)
 
-![Afloy Lora Box node](assets/node.png)
+<p align="center"><img src="assets/node.png" alt="Afloy Lora Box node" width="430"></p>
 
 <p>
 <a href="https://github.com/afloy011-spec/ComfyUI-LoraBox/archive/refs/heads/main.zip"><img src="https://img.shields.io/badge/Download_ZIP-059669?style=for-the-badge&logo=github&logoColor=white" alt="Download ZIP" height="32"></a>&nbsp;
