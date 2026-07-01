@@ -7,6 +7,8 @@ hand-drawn canvas widgets (rows shift / disappear). The editor is rendered as an
 HTML overlay independent of litegraph's widget layout, so it stays stable while
 offering a one-row-per-LoRA design.
 
+![Afloy Lora Box node](assets/node.png)
+
 ## Features
 
 - One row per LoRA: on/off switch, searchable picker, strength slider + number.
@@ -41,6 +43,10 @@ offering a one-row-per-LoRA design.
 - **Architecture-grouped picker**: loras are grouped (Z-Image, Flux, Krea, SDXL,
   SD1.5, …); **right-click** one to assign a custom group — it sticks across
   every Lora Box.
+
+| ⚙ options, presets & triggers | Per-LoRA triggers + note |
+|---|---|
+| ![options expanded](assets/options.png) | ![trigger words and note](assets/card.png) |
 
 ## Node
 
