@@ -126,7 +126,7 @@ the loaders for an SDXL/Flux/etc. base and it works the same.
 ### Advanced example (hi-res upscale + face detailer)
 
 [`examples/Afloy-LoraBox-Z-Image-Advanced.json`](examples/Afloy-LoraBox-Z-Image-Advanced.json)
-adds a **hi-res fix** (latent upscale + a second sampler) and a **FaceDetailer**
+adds a **hi-res fix** (pixel-space upscale + a second sampler) and a **FaceDetailer**
 pass, then shows a **before/after slider** and a **face-detection preview** (so
 you can see exactly where the face was refined) — ideal for character LoRAs
 (crisp faces even in full-body shots). Tunables are explained in its on-canvas
