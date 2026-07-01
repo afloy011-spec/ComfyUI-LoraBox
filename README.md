@@ -187,7 +187,7 @@ The strength slider covers the common `0..2` range, but the value box accepts an
 
 [`examples/Afloy-LoraBox-Z-Image.json`](examples/Afloy-LoraBox-Z-Image.json) — a clean, minimal graph built around Lora Box, using only core ComfyUI nodes plus this one.
 
-![example output](examples/preview.png)
+![basic workflow graph](examples/workflow-basic.png)
 
 ```
 UNETLoader ┐
@@ -196,12 +196,16 @@ VAELoader ─┘                              │  └────────�
                                           └─ MODEL / CLIP ───────────────────────────────┘
 ```
 
+![example output](examples/preview.png)
+
 > [!NOTE]
 > Install the Z-Image Turbo models first: `z_image_turbo_bf16` (UNet), `qwen_3_4b` (CLIP, type `lumina2`), `ae.safetensors` (VAE). The example ships with **empty rows** so it loads clean — just add your own LoRAs. This example is Z-Image Turbo, but the node is **architecture-agnostic** — swap the loaders for an SDXL / Flux base and it works the same.
 
 ### Advanced — hi-res upscale + face detailer
 
 [`examples/Afloy-LoraBox-Z-Image-Advanced.json`](examples/Afloy-LoraBox-Z-Image-Advanced.json) adds a **hi-res fix** (pixel-space upscale + a second sampler) and a **FaceDetailer** pass, then shows a **before/after slider** and a **face-detection preview** — ideal for character LoRAs (crisp faces even in full-body shots). Tunables are explained in its on-canvas note.
+
+![advanced workflow graph](examples/workflow-advanced.png)
 
 > [!IMPORTANT]
 > The advanced example needs [ComfyUI-Impact-Pack](https://github.com/ltdrdata/ComfyUI-Impact-Pack) (`FaceDetailer` + `UltralyticsDetectorProvider` + the `face_yolov8m` bbox model) and [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) (the before/after *Image Comparer*). Want zero dependencies? Use the basic example above.
