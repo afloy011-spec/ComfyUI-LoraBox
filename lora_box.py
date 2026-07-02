@@ -647,12 +647,13 @@ try:
     @PromptServer.instance.routes.get("/lorabox/triggers")
     async def _lorabox_triggers(request):
         file = request.query.get("file", "")
-        words = trigger_words_for(file)
+        # both paths block: the local one reads the safetensors header from disk
+        # (real I/O on a cold cache), the Civitai one hashes the file + hits the
+        # network — keep the event loop free for both.
+        loop = asyncio.get_event_loop()
+        words = await loop.run_in_executor(None, trigger_words_for, file)
         if not words:
-            # no local source (empty header metadata, no sidecar): try Civitai by
-            # file hash off the event loop (hashing + network are blocking)
-            words = await asyncio.get_event_loop().run_in_executor(
-                None, _fetch_civitai_triggers, file)
+            words = await loop.run_in_executor(None, _fetch_civitai_triggers, file)
         return web.json_response({"file": file, "words": words})
 
     def _all_categories():
