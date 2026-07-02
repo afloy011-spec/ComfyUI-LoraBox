@@ -1,8 +1,22 @@
 import { app } from "../../scripts/app.js";
-import { api } from "../../scripts/api.js";
+import {
+    getLoraList, loraListCache,
+    getLoraCategories, loraCategoriesCache, setLoraCategory,
+    fetchAuto,
+    getPresets, presetsCache, savePreset, deletePreset,
+    getNote, saveNote, getCivitai,
+    PREVIEW_CACHE, evictPreview, loadPreviewURL, uploadPreview, deletePreview, generatePreview,
+} from "./lb_api.js";
+import {
+    PLUS_SVG, MINUS_SVG, X_SVG, GEAR_SVG, SEARCH_SVG, CHECK_SVG,
+    IMAGE_SVG, UPLOAD_SVG, TRASH_SVG, LAYERS_SVG, CHEVRON_UP_SVG,
+} from "./lb_icons.js";
 
 /*
  * Afloy Lora Box UI — DOM-widget panel (clean-minimal redesign).
+ *
+ * Module layout: this file owns the DOM/UX only. All server I/O + caches live
+ * in ./lb_api.js; the SVG icon set lives in ./lb_icons.js.
  *
  * Design principles (high-rated 2026 apps — Linear / Vercel / Raycast):
  *  - clarity over cleverness: every control is labelled or has a tooltip;
@@ -44,192 +58,6 @@ const clampS = (v) => Math.max(SMIN, Math.min(SMAX, isNaN(v) ? 1 : v));
 // the same ±VMAX range, so what you type is what gets applied.
 const VMIN = -10, VMAX = 10;
 const clampV = (v) => Math.max(VMIN, Math.min(VMAX, isNaN(v) ? 1 : v));
-
-let LORA_LIST = null;
-let LORA_LIST_PROMISE = null;
-let LORA_CATEGORIES = null;
-let LORA_CAT_PROMISE = null;
-
-async function getLoraCategories() {
-    if (LORA_CATEGORIES) return LORA_CATEGORIES;
-    if (!LORA_CAT_PROMISE) {
-        LORA_CAT_PROMISE = (async () => {
-            try {
-                const r = await api.fetchApi("/lorabox/categories");
-                if (r.ok) {
-                    const j = await r.json();
-                    return j.categories || {};
-                }
-            } catch (e) {}
-            return {};
-        })().then((m) => (LORA_CATEGORIES = m || {}));
-    }
-    return LORA_CAT_PROMISE;
-}
-
-// Persist a lora's custom picker group (empty = revert to auto-detect). Updates
-// the local category map immediately so a redraw reflects it without a refetch.
-async function setLoraCategory(name, group) {
-    try {
-        const r = await api.fetchApi("/lorabox/usercats", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, group: group || "" }),
-        });
-        if (!r.ok) return false;
-        const j = await r.json();
-        if (LORA_CATEGORIES && j && j.name) LORA_CATEGORIES[j.name] = j.group;
-        return true;
-    } catch (e) { return false; }
-}
-
-async function getLoraList() {
-    if (LORA_LIST) return LORA_LIST;
-    if (!LORA_LIST_PROMISE) {
-        LORA_LIST_PROMISE = (async () => {
-            const tryJson = async (url) => {
-                try { const r = await api.fetchApi(url); if (r.ok) return await r.json(); } catch (e) {}
-                try { const r = await fetch(url); if (r.ok) return await r.json(); } catch (e) {}
-                return null;
-            };
-            let j = await tryJson("/rgthree/api/loras");
-            if (Array.isArray(j) && j.length) return j;
-            j = await tryJson("/object_info/LoraLoader");
-            const list = j?.LoraLoader?.input?.required?.lora_name?.[0];
-            if (Array.isArray(list)) return list.filter((x) => x !== "None");
-            return [];
-        })().then((l) => (LORA_LIST = l || []));
-    }
-    return LORA_LIST_PROMISE;
-}
-
-async function fetchAuto(name) {
-    try {
-        const r = await api.fetchApi("/lorabox/triggers?file=" + encodeURIComponent(name || ""));
-        const j = await r.json();
-        return j.words || [];
-    } catch (e) { return []; }
-}
-
-/* ---- stack presets ------------------------------------------------------- */
-let PRESETS = null;   // { name: {rows, pos, delim} }
-async function getPresets(force) {
-    if (PRESETS && !force) return PRESETS;
-    try {
-        const r = await api.fetchApi("/lorabox/presets");
-        const j = await r.json();
-        PRESETS = j.presets || {};
-    } catch (e) { PRESETS = PRESETS || {}; }
-    return PRESETS;
-}
-async function savePreset(name, data) {
-    try {
-        const r = await api.fetchApi("/lorabox/presets", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, data }),
-        });
-        const j = await r.json();
-        if (j.ok) await getPresets(true);
-        return j;
-    } catch (e) { return { ok: false, error: String(e) }; }
-}
-async function deletePreset(name) {
-    try {
-        await api.fetchApi("/lorabox/presets?name=" + encodeURIComponent(name), { method: "DELETE" });
-        await getPresets(true);
-        return true;
-    } catch (e) { return false; }
-}
-
-/* ---- per-lora notes + Civitai link --------------------------------------- */
-async function getNote(name) {
-    try {
-        const r = await api.fetchApi("/lorabox/note?file=" + encodeURIComponent(name || ""));
-        const j = await r.json();
-        return j.note || "";
-    } catch (e) { return ""; }
-}
-async function saveNote(name, note) {
-    try {
-        await api.fetchApi("/lorabox/note", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, note }),
-        });
-    } catch (e) {}
-}
-async function getCivitai(name) {
-    try {
-        const r = await api.fetchApi("/lorabox/civitai?file=" + encodeURIComponent(name || ""));
-        return await r.json();   // { url?, words? } — empty when opt-in is off / not found
-    } catch (e) { return {}; }
-}
-
-/* ---- per-lora preview images -------------------------------------------- */
-// Cache the resolved object URL per lora name (null = checked, none exists).
-// Shared across every card/render so re-rendering the list (drag-reorder, a
-// toggle, opening the trigger editor, …) reuses the already-loaded image
-// instead of refetching it — refetching is what made thumbnails flicker on
-// every interaction. Entries are evicted only when the picture actually
-// changes (upload / delete).
-const PREVIEW_CACHE = new Map();      // name -> objectURL | null
-const PREVIEW_PROMISES = new Map();   // name -> in-flight Promise (de-dupe)
-
-function evictPreview(name) {
-    if (PREVIEW_CACHE.has(name)) {
-        const u = PREVIEW_CACHE.get(name);
-        if (u) { try { URL.revokeObjectURL(u); } catch (e) {} }
-        PREVIEW_CACHE.delete(name);
-    }
-    PREVIEW_PROMISES.delete(name);
-}
-
-// Resolve a lora's preview as an object URL (server finds a manual sidecar OR
-// the lora's own <name>.preview.png), or null if none.
-async function loadPreviewURL(name) {
-    if (!name || name === "None") return null;
-    if (PREVIEW_CACHE.has(name)) return PREVIEW_CACHE.get(name);
-    if (PREVIEW_PROMISES.has(name)) return PREVIEW_PROMISES.get(name);
-    const p = (async () => {
-        try {
-            const r = await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name));
-            if (!r.ok) return null;
-            const b = await r.blob();
-            if (!b || !b.size) return null;
-            return URL.createObjectURL(b);
-        } catch (e) { return null; }
-    })().then((u) => { PREVIEW_CACHE.set(name, u); PREVIEW_PROMISES.delete(name); return u; });
-    PREVIEW_PROMISES.set(name, p);
-    return p;
-}
-
-async function uploadPreview(name, file) {
-    const ext = (file.name.split(".").pop() || "png").toLowerCase();
-    const r = await api.fetchApi(
-        "/lorabox/preview?file=" + encodeURIComponent(name) + "&ext=" + encodeURIComponent(ext),
-        { method: "POST", body: file });
-    return r.ok;
-}
-
-async function deletePreview(name) {
-    try { await api.fetchApi("/lorabox/preview?file=" + encodeURIComponent(name), { method: "DELETE" }); }
-    catch (e) {}
-}
-
-// Render a quick preview on the GPU (Z-Image test) and save it as the sidecar.
-async function generatePreview(name, kind = "character") {
-    if (!name || name === "None") return { ok: false, error: "no lora selected" };
-    const url = "/lorabox/preview/generate?file=" + encodeURIComponent(name) + "&kind=" + encodeURIComponent(kind);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 190000);
-    try {
-        const r = await api.fetchApi(url, { method: "POST", signal: ctrl.signal });
-        return await r.json();
-    } catch (e) {
-        if (e && e.name === "AbortError") return { ok: false, error: "timed out (3 min)" };
-        return { ok: false, error: String(e) };
-    } finally {
-        clearTimeout(timer);
-    }
-}
 
 /* floating enlarged preview on hover */
 let THUMB_POP = null;
@@ -601,6 +429,16 @@ function injectStyle() {
 .lb-menu-item.danger .ic{color:#ef5350;}
 .lb-menu-item.danger:hover{background:#5b2b2b; color:#fff;}
 .lb-menu-item.danger:hover .ic{color:#fff;}
+/* inline text field inside a menu (replaces window.prompt) */
+.lb-menu-input{display:flex; align-items:center; gap:6px; padding:3px;}
+.lb-menu-input input{flex:1 1 auto; min-width:0; height:28px; padding:0 9px; font-size:12px;
+  background:var(--lb-field,#0d0d0d); color:#eee; border:1px solid var(--lb-border,#2e2e2e);
+  border-radius:6px; outline:none; font-family:inherit;}
+.lb-menu-input input:focus{border-color:var(--lb-accent,#3b82f6);}
+.lb-menu-input .lb-menu-input-ok{flex:0 0 auto; width:28px; height:28px; display:flex; align-items:center;
+  justify-content:center; background:transparent; border:1px solid #3b5a8a; border-radius:6px;
+  cursor:pointer; color:var(--lb-accent,#3b82f6);}
+.lb-menu-input .lb-menu-input-ok:hover{background:var(--lb-accent-soft,#1d3a5f); color:#fff;}
 
 /* undo toast — bordered Undo button */
 .lb-toast{position:fixed; left:50%; bottom:26px; transform:translate(-50%,12px); opacity:0; z-index:10030;
@@ -640,24 +478,6 @@ function injectStyle() {
 const fmtNum = (v) => (Math.round(v * 100) / 100).toFixed(2);
 const tintNum = (el, v) => { el.classList.toggle("neg", v < 0); el.classList.toggle("zero", v === 0); };
 
-// ── Feather-style line icons used across the panel (match the Figma mockup) ──
-const svg = (inner, sz = 14) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
-// a tag glyph for the trigger-words toggle (clearer than the old ⓘ)
-const TAG_SVG = svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10z"/><circle cx="7" cy="7" r="1.4" fill="currentColor" stroke="none"/>');
-// plus / minus glyphs for the row's "extra parameters" (trigger words) toggle —
-// minus while the panel is open (a rotated × would clash with the adjacent delete ×)
-const PLUS_SVG = svg('<path d="M12 5v14M5 12h14"/>', 16);
-const MINUS_SVG = svg('<path d="M5 12h14"/>', 16);
-const X_SVG = svg('<path d="M18 6 6 18M6 6l12 12"/>', 16);
-const GEAR_SVG = svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>', 16);
-const SEARCH_SVG = svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>', 16);
-const CHECK_SVG = svg('<path d="M20 6 9 17l-5-5"/>', 16);
-const IMAGE_SVG = svg('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>', 16);
-const UPLOAD_SVG = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>', 16);
-const TRASH_SVG = svg('<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>', 16);
-const LAYERS_SVG = svg('<path d="M12 2 2 7l10 5 10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>', 18);
-const CHEVRON_UP_SVG = svg('<path d="m18 15-6-6-6 6"/>', 16);
-
 // Paint the blue fill on a native range input up to its current value, like the
 // Figma slider (blue left of the thumb, grey track to the right).
 function setSliderFill(slider, v, fill) {
@@ -695,7 +515,33 @@ function armMenuClose() {
         window.addEventListener("wheel", onMenuWheel, true);
     }, 0);
 }
-// items: [{head}] section label, or {label, desc?, onPick} action
+/* Swap a menu row for an inline text field (Enter/✓ confirms, Esc cancels).
+ * Replaces window.prompt: that blocks the whole tab, ignores the panel's
+ * styling and is disabled outright in some embedded webviews. */
+function inlineMenuInput(rowEl, placeholder, initial, onSubmit) {
+    const wrap = document.createElement("div");
+    wrap.className = "lb-menu-input";
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.placeholder = placeholder || ""; inp.value = initial || "";
+    const ok = document.createElement("button");
+    ok.className = "lb-menu-input-ok"; ok.innerHTML = CHECK_SVG; ok.title = "confirm";
+    ok.setAttribute("aria-label", "confirm");
+    const submit = () => { const v = inp.value.trim(); closeMenu(); if (v) onSubmit(v); };
+    ok.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); submit(); };
+    inp.onkeydown = (e) => {
+        e.stopPropagation();   // don't leak keys to the picker search / litegraph
+        if (e.key === "Enter") { e.preventDefault(); submit(); }
+        else if (e.key === "Escape") { e.preventDefault(); closeMenu(); }
+    };
+    stop(wrap);
+    wrap.append(inp, ok);
+    rowEl.replaceWith(wrap);
+    inp.focus(); inp.select();
+}
+
+// items: [{head}] section label, or {label, desc?, onPick} action; an action
+// with `input: {placeholder, initial}` swaps itself for an inline text field
+// and calls onPick(value) on confirm.
 function openMenu(anchor, items) {
     closeMenu();
     const m = document.createElement("div");
@@ -712,7 +558,11 @@ function openMenu(anchor, items) {
         if (it.icon) { const ic = document.createElement("span"); ic.className = "ic"; ic.innerHTML = it.icon; b.appendChild(ic); }
         const t = document.createElement("span"); t.className = "t"; t.textContent = it.label;
         b.appendChild(t);
-        b.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); closeMenu(); it.onPick(); };
+        b.onmousedown = (e) => {
+            e.preventDefault(); e.stopPropagation();
+            if (it.input) { inlineMenuInput(b, it.input.placeholder, it.input.initial, it.onPick); return; }
+            closeMenu(); it.onPick();
+        };
         m.appendChild(b);
     });
     stop(m);
@@ -733,8 +583,9 @@ function openMenu(anchor, items) {
 function customGroupsInUse() {
     const builtin = new Set(LORA_GROUP_ORDER);
     const out = [];
-    if (LORA_CATEGORIES) {
-        for (const v of Object.values(LORA_CATEGORIES)) {
+    const cats = loraCategoriesCache();
+    if (cats) {
+        for (const v of Object.values(cats)) {
             if (v && !builtin.has(v) && !out.includes(v)) out.push(v);
         }
     }
@@ -751,10 +602,8 @@ function openCategoryMenu(anchor, name, after) {
         items.push({ label: (g === cur ? "● " : "") + g, onPick: async () => { await setLoraCategory(name, g); after && after(); } });
     }
     items.push({ sep: true });
-    items.push({ label: "New group…", icon: PLUS_SVG, onPick: async () => {
-        const g = (window.prompt("New group name:") || "").trim();
-        if (g) { await setLoraCategory(name, g); after && after(); }
-    } });
+    items.push({ label: "New group…", icon: PLUS_SVG, input: { placeholder: "new group name…" },
+        onPick: async (g) => { await setLoraCategory(name, g); after && after(); } });
     items.push({ label: "Auto (detected)", onPick: async () => { await setLoraCategory(name, ""); after && after(); } });
     openMenu(anchor, items);
 }
@@ -800,17 +649,14 @@ function installTouchGuard() {
 // alphabetically between these and the trailing "Other".
 const LORA_GROUP_ORDER = ["Z-Image", "Flux", "Krea", "SDXL", "SD1.5", "LTX Video", "Other"];
 
+// The category comes ONLY from the server map (/lorabox/categories) — a single
+// source of truth shared with the backend. The old client-side filename
+// re-detection had already drifted from the Python rules; with it gone, an
+// unfetched/failed map just degrades every lora to "Other".
 function loraCategory(name) {
     if (!name || name === "None") return null;
-    if (LORA_CATEGORIES && LORA_CATEGORIES[name]) return LORA_CATEGORIES[name];
-    const low = name.toLowerCase().replace(/\\/g, "/");
-    if (low.includes("zimage") || low.includes("z-image") || low.includes("z_image")) return "Z-Image";
-    if (low.includes("ltx")) return "LTX Video";
-    if (low.includes("krea")) return "Krea";
-    if (low.includes("flux")) return "Flux";
-    if (/(^|[^a-z])xl([^a-z]|$)|sdxl/.test(low)) return "SDXL";
-    if (low.includes("sd15") || low.includes("sd1.5") || low.includes("sd_15") || low.includes("v1-5")) return "SD1.5";
-    return "Other";
+    const cats = loraCategoriesCache();
+    return (cats && cats[name]) || "Other";
 }
 
 // Effective group order = built-ins (that have items) + any custom groups
@@ -970,7 +816,7 @@ async function openPicker(node, row, fieldEl) {
     await Promise.all([getLoraList(), getLoraCategories()]);
     if (CUR_POP !== pop) return;
 
-    const all = LORA_LIST || [];
+    const all = loraListCache() || [];
 
     // model-aware: detect the wired model's architecture (best-effort). When
     // known, surface matching loras first + an "only compatible" toggle.
@@ -1375,8 +1221,9 @@ function markDuplicates(node) {
  * lora list is known; if it isn't yet, fetch then re-mark. */
 function markMissing(node) {
     const cards = node._lbList ? [...node._lbList.querySelectorAll(".lb-card")] : [];
-    if (!LORA_LIST) { getLoraList().then(() => markMissing(node)); return; }
-    const known = new Set(LORA_LIST);
+    const list = loraListCache();
+    if (!list) { getLoraList().then(() => markMissing(node)); return; }
+    const known = new Set(list);
     cards.forEach((el, i) => {
         const r = node._lbRows[i];
         el.classList.toggle("lb-missing", !!(r && r.name && r.name !== "None" && !known.has(r.name)));
@@ -1555,7 +1402,8 @@ function openPresetMenu(node, anchor) {
     head.className = "lb-menu-head"; head.textContent = "Presets";
     m.appendChild(head);
 
-    const names = Object.keys(PRESETS || {}).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    const presets = presetsCache();
+    const names = Object.keys(presets).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
     if (!names.length) {
         const e = document.createElement("div");
         e.className = "lb-pmenu-empty"; e.textContent = "No presets yet — save the current stack below.";
@@ -1572,7 +1420,7 @@ function openPresetMenu(node, anchor) {
             load.onmousedown = (e) => {
                 e.preventDefault(); e.stopPropagation(); closeMenu();
                 node._lbPresetName = n;
-                if (PRESETS[n]) applyPreset(node, PRESETS[n]);
+                if (presets[n]) applyPreset(node, presets[n]);
                 updatePresetField(node);
             };
             const del = document.createElement("button");
@@ -1595,13 +1443,13 @@ function openPresetMenu(node, anchor) {
     const sic = document.createElement("span"); sic.className = "ic"; sic.innerHTML = PLUS_SVG;
     const st = document.createElement("span"); st.className = "t"; st.textContent = "Save current as preset…";
     save.append(sic, st);
-    save.onmousedown = async (e) => {
-        e.preventDefault(); e.stopPropagation(); closeMenu();
-        const name = (window.prompt("Save current LoRA stack as preset:", node._lbPresetName || "") || "").trim();
-        if (!name) return;
-        const res = await savePreset(name, buildPresetData(node));
-        if (res.ok) { node._lbPresetName = name; updatePresetField(node); showToast("Preset saved: " + name, null, null, 2000); }
-        else showToast("Save failed: " + (res.error || "?"), null, null, 3000);
+    save.onmousedown = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        inlineMenuInput(save, "preset name…", node._lbPresetName || "", async (name) => {
+            const res = await savePreset(name, buildPresetData(node));
+            if (res.ok) { node._lbPresetName = name; updatePresetField(node); showToast("Preset saved: " + name, null, null, 2000); }
+            else showToast("Save failed: " + (res.error || "?"), null, null, 3000);
+        });
     };
     m.appendChild(save);
 
