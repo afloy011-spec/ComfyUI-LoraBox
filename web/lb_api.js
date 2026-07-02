@@ -194,10 +194,16 @@ export async function deletePreview(name) {
     catch (e) {}
 }
 
-// Render a quick preview on the GPU (architecture-aware) and save it as the sidecar.
-export async function generatePreview(name, kind = "character") {
+// Render a quick preview on the GPU (architecture-aware) and save it as the
+// sidecar. sm/sc = the row's current weights, so the preview shows the LoRA as
+// the user actually runs it (0 / non-finite are ignored server-side and fall
+// back to the engine default); customPrompt = one-off base prompt.
+export async function generatePreview(name, kind = "character", sm, sc, customPrompt) {
     if (!name || name === "None") return { ok: false, error: "no lora selected" };
-    const url = "/lorabox/preview/generate?file=" + encodeURIComponent(name) + "&kind=" + encodeURIComponent(kind);
+    let url = "/lorabox/preview/generate?file=" + encodeURIComponent(name) + "&kind=" + encodeURIComponent(kind);
+    if (Number.isFinite(sm)) url += "&sm=" + encodeURIComponent(sm);
+    if (Number.isFinite(sc)) url += "&sc=" + encodeURIComponent(sc);
+    if (customPrompt) url += "&prompt=" + encodeURIComponent(String(customPrompt).slice(0, 1000));
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 190000);
     try {

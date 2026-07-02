@@ -62,7 +62,7 @@ class TestPreviewGenerate(unittest.TestCase):
         self.assertEqual(lora["inputs"]["lora_name"], "hero.safetensors")
         pos = next(v for v in p.values() if v["class_type"] == "CLIPTextEncode"
                    and "herotok" in v["inputs"]["text"])
-        self.assertIn("portrait photo", pos["inputs"]["text"])
+        self.assertIn("portrait", pos["inputs"]["text"])
 
     def test_triggers_go_in_front(self):
         # trigger words are placed in front of the base prompt for every kind
@@ -140,6 +140,72 @@ class TestPreviewGenerate(unittest.TestCase):
             preview_generate.build_preview_prompt("flux_char.safetensors")
         self.assertIn("Flux", str(cm.exception))
         self.assertIn("aren't installed", str(cm.exception))
+
+    def test_engine_ignores_user_category(self):
+        # a custom picker group ("My characters") says nothing about the
+        # architecture — the engine must come from auto-detection, not the
+        # user's grouping (a re-grouped flux lora used to hit the default engine)
+        _write_lora("flux_char.safetensors")
+        old = lora_box._USERCATS
+        lora_box._USERCATS = {"flux_char.safetensors": "My characters"}
+        try:
+            self.assertEqual(preview_generate.engine_for("flux_char.safetensors"), "flux")
+        finally:
+            lora_box._USERCATS = old
+
+    def test_ltx_video_lora_refused(self):
+        _write_lora("dance_ltx.safetensors")
+        with self.assertRaises(RuntimeError) as cm:
+            preview_generate.build_preview_prompt("dance_ltx.safetensors")
+        self.assertIn("LTX", str(cm.exception))
+        self.assertIn("Upload", str(cm.exception))
+
+    def test_row_strengths_used(self):
+        # the row's weights land on the LoraLoader instead of the 0.9 default
+        _write_lora("hero.safetensors")
+        p = preview_generate.build_preview_prompt(
+            "hero.safetensors", "character", strength_model=0.55, strength_clip=0.6)
+        lora = next(v for v in p.values() if v["class_type"] == "LoraLoader")
+        self.assertEqual(lora["inputs"]["strength_model"], 0.55)
+        self.assertEqual(lora["inputs"]["strength_clip"], 0.6)
+
+    def test_default_strength_when_not_passed(self):
+        _write_lora("hero.safetensors")
+        p = preview_generate.build_preview_prompt("hero.safetensors")
+        lora = next(v for v in p.values() if v["class_type"] == "LoraLoader")
+        self.assertEqual(lora["inputs"]["strength_model"],
+                         preview_generate.PREVIEW_CONFIG["lora_strength_model"])
+
+    def test_custom_prompt_override(self):
+        # an explicit prompt replaces the kind base but keeps the triggers
+        _write_lora("hero.safetensors", {"ss_trigger_words": "herotok"})
+        p = preview_generate.build_preview_prompt(
+            "hero.safetensors", "character", prompt_override="a red fox in deep snow")
+        text = next(v["inputs"]["text"] for v in p.values()
+                    if v["class_type"] == "CLIPTextEncode" and "herotok" in v["inputs"]["text"])
+        self.assertIn("a red fox in deep snow", text)
+        self.assertNotIn("portrait", text)
+
+    def test_sidecar_preview_prompt(self):
+        # a <lora>.preview.txt next to the file becomes the persistent base prompt
+        path = _write_lora("hero.safetensors")
+        txt = os.path.splitext(path)[0] + ".preview.txt"
+        with open(txt, "w", encoding="utf-8") as f:
+            f.write("standing on a mountain ridge at dawn\n")
+        try:
+            p = preview_generate.build_preview_prompt("hero.safetensors")
+            text = next(v["inputs"]["text"] for v in p.values()
+                        if v["class_type"] == "CLIPTextEncode"
+                        and "mountain ridge" in v["inputs"]["text"])
+            self.assertNotIn("portrait", text)
+        finally:
+            os.remove(txt)
+
+    def test_object_kind_prompt(self):
+        _write_lora("hero.safetensors")
+        p = preview_generate.build_preview_prompt("hero.safetensors", "object")
+        texts = [v["inputs"]["text"] for v in p.values() if v["class_type"] == "CLIPTextEncode"]
+        self.assertTrue(any("plain surface" in t for t in texts))
 
 
 if __name__ == "__main__":

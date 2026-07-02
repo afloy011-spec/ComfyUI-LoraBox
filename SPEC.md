@@ -208,7 +208,7 @@ event loop.
 | GET | `/lorabox/preview?file=` | Serve preview image bytes |
 | POST | `/lorabox/preview?file=&ext=` | Upload sidecar (≤ 8 MB) |
 | DELETE | `/lorabox/preview?file=` | Remove sidecar |
-| POST | `/lorabox/preview/generate?file=&kind=` | Generate canonical preview (engine by architecture) |
+| POST | `/lorabox/preview/generate?file=&kind=&sm=&sc=&prompt=` | Generate canonical preview (engine by auto-detected architecture; optional row weights + custom base prompt) |
 
 ---
 

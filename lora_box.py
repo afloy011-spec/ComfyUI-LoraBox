@@ -823,11 +823,27 @@ try:
                 pass
         return web.json_response({"ok": removed})
 
+    def _gen_strength(qv):
+        """Optional per-row strength from the query: finite, non-zero, clamped
+        to the same ±10 the node applies; None -> engine default (0.9)."""
+        try:
+            v = float(qv)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(v) or v == 0.0:
+            return None
+        return max(-10.0, min(10.0, v))
+
     @PromptServer.instance.routes.post("/lorabox/preview/generate")
     async def _lorabox_preview_generate(request):
-        """Render a quick Z-Image test image and save it as the lora sidecar."""
+        """Render a quick architecture-matched test image and save it as the
+        lora sidecar. Optional query params: sm/sc (the row's weights) and
+        prompt (a one-off custom base prompt)."""
         lora = request.query.get("file", "")
         kind = request.query.get("kind", "character")
+        sm = _gen_strength(request.query.get("sm"))
+        sc = _gen_strength(request.query.get("sc"))
+        prompt_override = str(request.query.get("prompt", "") or "").strip()[:1000]
         if not _preview_base(lora):
             return web.json_response({"ok": False, "error": "unknown lora"}, status=400)
         try:
@@ -835,7 +851,7 @@ try:
                 from .preview_generate import generate_lora_preview
             except ImportError:
                 from preview_generate import generate_lora_preview
-            path = await generate_lora_preview(lora, kind)
+            path = await generate_lora_preview(lora, kind, sm, sc, prompt_override)
             return web.json_response({"ok": True, "path": os.path.basename(path)})
         except TimeoutError as ex:
             return web.json_response({"ok": False, "error": str(ex)}, status=504)

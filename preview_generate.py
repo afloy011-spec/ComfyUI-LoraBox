@@ -20,10 +20,10 @@ import folder_paths
 
 try:
     from .lora_box import (trigger_words_for, merge_prompt, _preview_base,
-                           category_for, PREVIEW_EXTS)
+                           _auto_category, PREVIEW_EXTS)
 except ImportError:
     from lora_box import (trigger_words_for, merge_prompt, _preview_base,
-                          category_for, PREVIEW_EXTS)
+                          _auto_category, PREVIEW_EXTS)
 
 log = logging.getLogger("LoraBox.preview")
 
@@ -96,19 +96,29 @@ def _resolve_model(folders, configured) -> str | None:
     return None
 
 # Base prompts are shared across all loras so thumbnails are comparable.
+# Deliberately style- and subject-neutral: no "photorealistic" (it fights
+# stylized/anime LoRAs — let the LoRA dictate the look) and no forced subject
+# in the scene prompts (a style LoRA about landscapes shouldn't render a
+# hardcoded person). The trigger words carry the LoRA's own subject.
 PREVIEW_PROMPTS = {
     "character": (
-        "portrait photo, soft natural daylight, simple neutral background, "
-        "relaxed pose, photorealistic, candid"
+        "portrait, upper body, soft natural daylight, simple neutral background, "
+        "relaxed pose, candid"
     ),
     "style": (
-        "a woman reading a book in a cafe, soft daylight, natural colors, everyday scene"
+        "a quiet street corner with a small cafe, soft daylight, natural colors, "
+        "everyday scene"
+    ),
+    "object": (
+        "centered on a plain surface, soft studio light, simple neutral background, "
+        "detailed close-up"
     ),
 }
 
 SAVE_NODE_ID = "11"
 PREVIEW_TIMEOUT_S = 180
 PREVIEW_THUMB_MAX = 512
+MAX_PREVIEW_PROMPT = 1000   # cap a custom / sidecar preview prompt
 
 _GEN_LOCK = asyncio.Lock()
 
@@ -207,12 +217,18 @@ def _default_engine() -> str:
 
 
 def engine_for(lora_name: str) -> str:
-    """Pick the render engine for a lora: explicit override, else its category."""
+    """Pick the render engine: explicit override, else the AUTO-detected
+    architecture.
+
+    Deliberately NOT category_for(): that returns the user's custom picker
+    group first ("My characters"), which says nothing about the architecture —
+    a re-grouped SDXL lora would silently render on the default engine.
+    """
     forced = os.environ.get("LORABOX_PREVIEW_ENGINE", "").strip().lower()
     if forced in ENGINE_LABELS:
         return forced
     try:
-        cat = category_for(lora_name)
+        cat = _auto_category(lora_name)
     except Exception:
         cat = None
     return _CATEGORY_ENGINE.get(cat, _default_engine())
@@ -302,23 +318,59 @@ ENGINE_BUILD = {"zimage": _build_zimage, "flux": _build_flux,
                 "sdxl": _build_checkpoint, "sd15": _build_checkpoint}
 
 
-def build_preview_prompt(lora_name: str, kind: str = "character") -> dict:
+def _sidecar_preview_prompt(lora_name: str) -> str:
+    """A persistent per-lora preview prompt from <lora>.preview.txt (or "")."""
+    base = _preview_base(lora_name)
+    if not base:
+        return ""
+    p = base + ".preview.txt"
+    try:
+        if os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                return f.read().strip()[:MAX_PREVIEW_PROMPT]
+    except OSError:
+        pass
+    return ""
+
+
+def build_preview_prompt(lora_name: str, kind: str = "character",
+                         strength_model: float | None = None,
+                         strength_clip: float | None = None,
+                         prompt_override: str = "") -> dict:
     """Return a ComfyUI API prompt dict for one canonical preview image.
 
     The graph matches the LoRA's architecture (Z-Image / Flux / SDXL / SD1.5).
     Raises RuntimeError naming the missing models if that engine isn't installed.
+    Base prompt priority: explicit override (the UI's "Custom prompt…") >
+    a <lora>.preview.txt sidecar > the shared kind prompt.
     """
     kind = (kind or "character").lower()
     if kind not in PREVIEW_PROMPTS:
         kind = "character"
 
+    # A video LoRA can't be represented by this still-image pipeline — refuse
+    # with a clear message instead of rendering it through a wrong engine.
+    # An explicit LORABOX_PREVIEW_ENGINE override wins (the user knows better).
+    forced = os.environ.get("LORABOX_PREVIEW_ENGINE", "").strip().lower()
+    if forced not in ENGINE_LABELS and _auto_category(lora_name) == "LTX Video":
+        raise RuntimeError(
+            "This is an LTX video LoRA — a still-image preview render isn't "
+            "supported. Set a picture with Upload or drag-and-drop instead.")
+
     triggers = ", ".join(trigger_words_for(lora_name))
-    base = PREVIEW_PROMPTS[kind]
+    base = (prompt_override or "").strip()[:MAX_PREVIEW_PROMPT] \
+        or _sidecar_preview_prompt(lora_name) or PREVIEW_PROMPTS[kind]
     # trigger words go in front by default (stronger activation on the encoder)
     positive = merge_prompt(base, triggers, "beginning", ", ")
 
     engine = engine_for(lora_name)
     cfg = _engine_cfg(engine)
+    # The row's Generate passes the weights the user actually runs the LoRA at,
+    # so the preview shows it as it will really look; None keeps the default.
+    if strength_model is not None:
+        cfg["lora_strength_model"] = strength_model
+    if strength_clip is not None:
+        cfg["lora_strength_clip"] = strength_clip
     resolved, missing = {}, []
     for key, folders, label in ENGINE_SLOTS[engine]:
         got = _resolve_model(folders, cfg[key])
@@ -459,13 +511,17 @@ async def _queue_and_wait(prompt_dict: dict, timeout: int = PREVIEW_TIMEOUT_S) -
     raise TimeoutError(f"preview timed out after {timeout}s")
 
 
-async def generate_lora_preview(lora_name: str, kind: str = "character") -> str:
+async def generate_lora_preview(lora_name: str, kind: str = "character",
+                                strength_model: float | None = None,
+                                strength_clip: float | None = None,
+                                prompt_override: str = "") -> str:
     """Queue a canonical preview, save sidecar PNG; returns sidecar path."""
     if not _preview_base(lora_name):
         raise ValueError("unknown lora")
 
     async with _GEN_LOCK:
-        prompt = build_preview_prompt(lora_name, kind)
+        prompt = build_preview_prompt(lora_name, kind, strength_model,
+                                      strength_clip, prompt_override)
         img_info = await _queue_and_wait(prompt)
         src = _comfy_image_path(img_info)
         if not os.path.isfile(src):

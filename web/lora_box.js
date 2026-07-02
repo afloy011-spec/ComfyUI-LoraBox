@@ -1673,11 +1673,14 @@ function buildThumb(node, row) {
         inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) applyFile(f); };
         inp.click();
     };
-    const doGen = async (kind) => {
+    const doGen = async (kind, customPrompt) => {
         if (thumb.classList.contains("busy")) return;
         closeThumbPop();
         thumb.classList.add("busy");
-        const res = await generatePreview(row.name, kind);
+        // pass the row's weights so the preview matches how the LoRA is used;
+        // outside Model+Clip mode the clip weight mirrors sm (same rule as serialize)
+        const effSc = node._lbSep ? row.sc : row.sm;
+        const res = await generatePreview(row.name, kind, row.sm, effSc, customPrompt);
         thumb.classList.remove("busy");
         if (res && res.ok) { evictPreview(row.name); refresh(); }
         else showToast("Preview generation failed: " + ((res && res.error) || "unknown error"), null, null, 5000);
@@ -1690,6 +1693,9 @@ function buildThumb(node, row) {
             { head: "Picture for this LoRA" },
             { label: "Generate — Character", icon: IMAGE_SVG, onPick: () => doGen("character") },
             { label: "Generate — Style", icon: IMAGE_SVG, onPick: () => doGen("style") },
+            { label: "Generate — Object / Scene", icon: IMAGE_SVG, onPick: () => doGen("object") },
+            { label: "Generate — Custom prompt…", icon: IMAGE_SVG,
+              input: { placeholder: "preview prompt…" }, onPick: (p) => doGen("character", p) },
             { sep: true },
             { label: "Upload an image…", icon: UPLOAD_SVG, onPick: pickFile },
         ];

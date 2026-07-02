@@ -3,6 +3,37 @@
 All notable changes to **Afloy Lora Box** are documented here.
 Versions follow [SemVer](https://semver.org); each release is a git tag (`vX.Y.Z`).
 
+## [1.8.0] — 2026-07-02
+
+Preview generation v2 — the rendered thumbnail now reflects how the LoRA is
+actually used, instead of one hardcoded recipe.
+
+### Fixed
+- **The render engine is picked from the auto-detected architecture.**
+  It used to go through `category_for()`, which returns the user's custom
+  picker group first — a LoRA moved to a group like "My characters" silently
+  rendered on the default (Z-Image) engine even if it was SDXL/Flux.
+- **LTX video LoRAs are refused with a clear message** instead of being
+  rendered through a wrong still-image engine (an explicit
+  `LORABOX_PREVIEW_ENGINE` override still wins).
+
+### Changed
+- **Generate uses the row's weights** (`sm`/`sc`) instead of a hardcoded
+  0.9/0.9, so the preview shows the LoRA at the strength you actually run it
+  (0 / non-finite fall back to the engine default).
+- **Base prompts are style- and subject-neutral**: no more "photorealistic"
+  in the character prompt (it fought stylized/anime LoRAs) and no hardcoded
+  person in the style prompt (a landscape style LoRA no longer renders
+  a woman in a cafe).
+
+### Added
+- **Generate — Object / Scene** mode for non-person LoRAs.
+- **Generate — Custom prompt…** — a one-off base prompt typed inline in the
+  thumbnail menu.
+- **`<lora>.preview.txt` sidecar** — a persistent per-LoRA preview prompt
+  (override priority: menu prompt > sidecar > kind prompt; trigger words are
+  merged in for all of them).
+
 ## [1.7.0] — 2026-07-02
 
 Hardening + housekeeping release: no behaviour changes to the node itself.
