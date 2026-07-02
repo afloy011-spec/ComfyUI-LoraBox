@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import json
 import time
-import uuid
 import asyncio
 import logging
 import shutil
@@ -376,44 +375,87 @@ def _write_sidecar_png(lora_name: str, src_path: str) -> str:
     return dest
 
 
-async def _queue_and_wait(prompt_dict: dict, timeout: int = PREVIEW_TIMEOUT_S) -> dict:
-    import execution
+def _server_base_url() -> str:
+    """Loopback URL of the running ComfyUI HTTP server.
+
+    The listen address may be a wildcard (0.0.0.0 / ::) or IPv6 — plain IPv4
+    loopback reaches all of those from inside the same process.
+    """
     from server import PromptServer
 
     server = PromptServer.instance
-    prompt_id = str(uuid.uuid4())
-    valid = await execution.validate_prompt(prompt_id, prompt_dict, None)
-    if not valid[0]:
-        raise RuntimeError(str(valid[1]))
+    port = getattr(server, "port", None) or 8188
+    addr = str(getattr(server, "address", "") or "")
+    # newer ComfyUI accepts a comma-separated listen list — take the first entry
+    addr = addr.split(",")[0].strip()
+    if not addr or addr in ("0.0.0.0", "::") or ":" in addr:
+        addr = "127.0.0.1"
+    scheme = "http"
+    try:
+        from comfy.cli_args import args as _args
+        if getattr(_args, "tls_keyfile", None):
+            scheme = "https"
+    except Exception:
+        pass
+    return "%s://%s:%s" % (scheme, addr, port)
 
-    number = server.number
-    server.number += 1
-    extra_data = {"client_id": "lorabox_preview", "create_time": int(time.time() * 1000)}
-    server.prompt_queue.put(
-        (number, prompt_id, prompt_dict, extra_data, valid[2], {})
-    )
-    log.info("[LoraBox] preview queued id=%s", prompt_id)
 
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        await asyncio.sleep(0.75)
-        hist = server.prompt_queue.get_history(prompt_id=prompt_id)
-        if prompt_id not in hist:
-            continue
-        entry = hist[prompt_id]
-        status = entry.get("status") or {}
-        for msg in status.get("messages") or []:
-            if isinstance(msg, (list, tuple)) and msg and msg[0] == "execution_error":
-                raise RuntimeError(str(msg[1]))
-        if not status.get("completed"):
-            continue
-        outputs = entry.get("outputs") or {}
-        if SAVE_NODE_ID in outputs and outputs[SAVE_NODE_ID].get("images"):
-            return outputs[SAVE_NODE_ID]["images"][0]
-        for out in outputs.values():
-            if out.get("images"):
-                return out["images"][0]
-        raise RuntimeError("generation finished but produced no image")
+async def _queue_and_wait(prompt_dict: dict, timeout: int = PREVIEW_TIMEOUT_S) -> dict:
+    """Queue the graph and wait for its image via the PUBLIC HTTP API.
+
+    POST /prompt + GET /history/{id} are the endpoints external clients use and
+    are stable across ComfyUI versions — unlike the in-process prompt_queue
+    internals (whose tuple shape has changed before), which this deliberately
+    avoids. Validation errors come back in the /prompt 400 response.
+    """
+    import aiohttp
+
+    base = _server_base_url()
+    # self-signed TLS (--tls-keyfile) would fail loopback cert verification
+    connector = aiohttp.TCPConnector(ssl=False) if base.startswith("https") else None
+    async with aiohttp.ClientSession(connector=connector) as sess:
+        payload = {"prompt": prompt_dict, "client_id": "lorabox_preview"}
+        async with sess.post(base + "/prompt", json=payload) as r:
+            try:
+                body = await r.json(content_type=None)
+            except Exception:
+                body = None    # non-JSON reply (proxy error page etc.)
+            if r.status != 200:
+                err = (body or {}).get("error") or body or ("HTTP %s from /prompt" % r.status)
+                if isinstance(err, dict):
+                    err = err.get("message") or err
+                raise RuntimeError(str(err))
+            prompt_id = (body or {}).get("prompt_id")
+            if not prompt_id:
+                raise RuntimeError("queueing returned no prompt_id: %s" % (body,))
+        log.info("[LoraBox] preview queued id=%s", prompt_id)
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            await asyncio.sleep(0.75)
+            async with sess.get(base + "/history/" + prompt_id) as r:
+                if r.status != 200:
+                    continue
+                try:
+                    hist = await r.json(content_type=None)
+                except Exception:
+                    continue
+            entry = (hist or {}).get(prompt_id)
+            if not entry:
+                continue
+            status = entry.get("status") or {}
+            for msg in status.get("messages") or []:
+                if isinstance(msg, (list, tuple)) and msg and msg[0] == "execution_error":
+                    raise RuntimeError(str(msg[1]))
+            if not status.get("completed"):
+                continue
+            outputs = entry.get("outputs") or {}
+            if SAVE_NODE_ID in outputs and outputs[SAVE_NODE_ID].get("images"):
+                return outputs[SAVE_NODE_ID]["images"][0]
+            for out in outputs.values():
+                if out.get("images"):
+                    return out["images"][0]
+            raise RuntimeError("generation finished but produced no image")
     raise TimeoutError(f"preview timed out after {timeout}s")
 
 
