@@ -5,7 +5,8 @@ A compact multi-LoRA loader for [ComfyUI](https://github.com/comfyanonymous/Comf
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-compatible-8A2BE2?style=flat-square)](https://github.com/comfyanonymous/ComfyUI)
-[![Version](https://img.shields.io/badge/version-1.6.5-059669?style=flat-square)](https://github.com/afloy011-spec/ComfyUI-LoraBox/tags)
+[![Version](https://img.shields.io/badge/version-1.7.0-059669?style=flat-square)](https://github.com/afloy011-spec/ComfyUI-LoraBox/blob/main/CHANGELOG.md)
+[![Tests](https://github.com/afloy011-spec/ComfyUI-LoraBox/actions/workflows/test.yml/badge.svg)](https://github.com/afloy011-spec/ComfyUI-LoraBox/actions/workflows/test.yml)
 
 ![Afloy Lora Box](assets/hero.png)
 
@@ -71,9 +72,12 @@ ComfyUI/
         ├── pyproject.toml
         ├── LICENSE
         ├── README.md
+        ├── CHANGELOG.md
         ├── examples/             ← ready-to-load workflows
         └── web/
-            └── lora_box.js       ← the DOM-panel UI
+            ├── lora_box.js       ← the DOM-panel UI
+            ├── lb_api.js         ← server I/O + client caches
+            └── lb_icons.js       ← SVG icon set
 ```
 
 > [!NOTE]
@@ -256,7 +260,7 @@ When a LoRA has no local trigger words / preview, the node can resolve them from
 python -m unittest discover -s tests -v
 ```
 
-Tests stub `folder_paths` / `comfy.*`, so they run without a full ComfyUI install.
+Tests stub `folder_paths` / `comfy.*`, so they run without a full ComfyUI install. CI (GitHub Actions) runs the same suite on Python 3.9–3.12 for every push and PR. Releases are tagged (`vX.Y.Z`) and summarised in [CHANGELOG.md](CHANGELOG.md).
 
 **Implementation notes**
 
